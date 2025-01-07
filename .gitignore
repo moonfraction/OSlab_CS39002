@@ -8,6 +8,7 @@ node_modules/
 *.class
 *.o
 *.so
+*.out
 
 # Ignore system files
 .DS_Store
