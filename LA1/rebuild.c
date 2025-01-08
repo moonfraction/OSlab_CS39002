@@ -21,17 +21,26 @@ int main(int argc, char* argv[]) {
     else {  
         u = atoi(argv[1]); // parent foodule
         fp = fopen("foodep.txt", "r");
+        if (fp == NULL) {
+            perror("Error opening foodep.txt");
+            exit(1);
+        }
         fscanf(fp, "%d", &n);
 
         if(u > n) {
             printf("Invalid foodule\n");
+            fclose(fp);
             exit(1);
         }
-
     }
 
     if(argc==2) {
         done_fp = fopen("done.txt", "w");
+        if (done_fp == NULL) {
+            perror("Error opening done.txt");
+            fclose(fp);
+            exit(1);
+        }
         for (int i = 0; i < n; i++) {
             fprintf(done_fp, "0");
         }
@@ -39,10 +48,16 @@ int main(int argc, char* argv[]) {
     }
 
     done_fp = fopen("done.txt", "r");
+    if (done_fp == NULL) {
+        perror("Error opening done.txt");
+        fclose(fp);
+        exit(1);
+    }
     fscanf(done_fp, "%s", visited);
     // printf("u = %d\n", u);
     if(visited[u-1] == '1') {
         fclose(done_fp);
+        fclose(fp);
         // printf("foo%d is already rebuilt\n", u);
         exit(0);
     }
@@ -51,10 +66,13 @@ int main(int argc, char* argv[]) {
     // printf("visited = %s\n", visited);
     fclose(done_fp);
     done_fp = fopen("done.txt", "w");
+    if (done_fp == NULL) {
+        perror("Error opening done.txt");
+        fclose(fp);
+        exit(1);
+    }
     fprintf(done_fp, "%s", visited);
     fclose(done_fp);
-
-
 
     char temp[MAX];
     char* parent;
@@ -93,11 +111,15 @@ int main(int argc, char* argv[]) {
             // get the char from the string in done.txt
             //open the file
             FILE* done_fp = fopen("done.txt", "r");
+            if (done_fp == NULL) {
+                perror("Error opening done.txt");
+                exit(1);
+            }
             // print the string in done.txt
             fseek(done_fp, child_foodule[i]-1, SEEK_SET);
             fscanf(done_fp, "%c", &vis);
+            fclose(done_fp);
             // printf("visited = %c\n", vis);
-
 
             if(vis == '0') {
                 char temp[MAX];
