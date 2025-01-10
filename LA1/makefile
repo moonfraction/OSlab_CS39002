@@ -1,6 +1,10 @@
 all: clean
 	gcc -o gendep gendep.c
-	./gendep > foodep.txt
+	@if [ -z "$(n)" ]; then \
+		./gendep; \
+	else \
+		./gendep $(n); \
+	fi > foodep.txt
 	gcc -o rebuild rebuild.c
 	@echo "Compilation Successful, use 'make run NUM=5' to generate output file"
 
@@ -12,7 +16,6 @@ run:
 		./rebuild $(NUM); \
 		echo "./rebuild $(NUM)"; \
 	fi
-	@echo "Rebuild process completed"
 
 clean:
 	rm -f gendep rebuild done.txt foodep.txt
