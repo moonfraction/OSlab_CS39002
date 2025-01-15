@@ -4,10 +4,15 @@
 #include <unistd.h>
 #include <time.h>
 
+#define PLAYING     0
+#define CATCHMADE   1
+#define CATCHMISSED 2
+#define OUTOFGAME   3
+
 int n, my_index;
 pid_t *child_pids;
 int is_playing = 1;
-int last_action = 0;  // 0: none, 1: catch, 2: miss
+int last_action = PLAYING;
 
 void print_border() {
     printf("\n+----------------------------------------------------------------------------------------------+\n");
@@ -19,25 +24,28 @@ void handle_throw(int signo) {
     if (signo == SIGUSR2 && is_playing) {
         double prob = (double)rand() / RAND_MAX;
         if (prob < 0.8) {
-            last_action = 1; // CATCH
+            last_action = CATCHMADE;
             kill(getppid(), SIGUSR1);
         } else {
-            last_action = 2; // MISS
+            last_action = CATCHMISSED;
             kill(getppid(), SIGUSR2);
         }
     } else if (signo == SIGUSR1) {
         if(my_index==0) printf("|\t");
-        if (!is_playing)
-            printf("        ");  // Out of game
-        else if (last_action > 0)  // Current turn
-            printf("%s ", last_action == 1 ? "CATCH  " : "MISS   ");
-        else
-            printf("....    ");  // Playing but not current turn
+        if (!is_playing && last_action != CATCHMISSED)
+            printf("        ");  // OUTOFGAME
+        else if (last_action == CATCHMADE)
+            printf("CATCH   ");
+        else if (last_action == CATCHMISSED)
+            printf("MISS    ");
+        else if (last_action == PLAYING)
+            printf("....    ");
         fflush(stdout);
         if(my_index==n-1) printf("       |");
         
-        // Update playing status after print
-        if (last_action == 2) is_playing = 0;
+        if (last_action == CATCHMISSED) {
+            is_playing = 0;
+        }
             
         if (my_index < n - 1) {
             kill(child_pids[my_index + 1], SIGUSR1);
@@ -52,7 +60,7 @@ void handle_throw(int signo) {
         last_action = 0;  // Reset action after print
     }
     else if (signo == SIGINT) {
-        if (is_playing && last_action == 0) {
+        if (is_playing && last_action == PLAYING) {
             printf("\n+++ Child %d: Yay! I am the winner!\n", my_index + 1);
             exit(0);
         }
