@@ -4,7 +4,6 @@
 #include <unistd.h>
 #include <time.h>
 
-// Add status tracking variables at top
 int n, my_index;
 pid_t *child_pids;
 int is_playing = 1;
@@ -27,7 +26,6 @@ void handle_throw(int signo) {
             kill(getppid(), SIGUSR2);
         }
     } else if (signo == SIGUSR1) {
-        // Print based on current status
         if(my_index==0) printf("|\t");
         if (!is_playing)
             printf("        ");  // Out of game
@@ -38,7 +36,7 @@ void handle_throw(int signo) {
         fflush(stdout);
         if(my_index==n-1) printf("       |");
         
-        // Update playing status after printing
+        // Update playing status after print
         if (last_action == 2) is_playing = 0;
             
         if (my_index < n - 1) {
@@ -51,7 +49,7 @@ void handle_throw(int signo) {
             fclose(fp);
             kill(dummy_pid, SIGINT);
         }
-        last_action = 0;  // Reset action after printing
+        last_action = 0;  // Reset action after print
     }
     else if (signo == SIGINT) {
         if (is_playing && last_action == 0) {

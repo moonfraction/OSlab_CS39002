@@ -92,7 +92,7 @@ int main(int argc, char *argv[]) {
         current_player = next_player();
     }
 
-    // Print final status before ending game
+    // Printing final status before ending game
     pid_t dummy_pid = fork();
     if (dummy_pid == 0) {
         execl("./dummy", "dummy", NULL);
@@ -104,7 +104,7 @@ int main(int argc, char *argv[]) {
     fclose(fp);
 
     // print_header();
-    kill(child_pids[0], SIGUSR1);  // Trigger final status printing
+    kill(child_pids[0], SIGUSR1);  // final print
     waitpid(dummy_pid, NULL, 0);
 
     print_header();
