@@ -70,7 +70,7 @@ void handle_throw(int signo) {
 
 int main(int argc, char *argv[]) {
     my_index = atoi(argv[1]) - 1;
-    unsigned int seed = getpid() + my_index + time(NULL);
+    unsigned int seed = getpid() * (my_index + 1) + time(NULL);
     srand(seed);
     sleep(1);
     
