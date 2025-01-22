@@ -101,7 +101,6 @@ int compare_events(SchedulerEvent* a, SchedulerEvent* b) {
         return a->timestamp - b->timestamp;
     
     if (a->category != b->category) {
-        // Give priority to arrivals and unblocks over preemptions
         if ((a->category == EVT_START || a->category == EVT_UNBLOCK) && 
             b->category == EVT_PREEMPT)
             return -1;
@@ -110,7 +109,6 @@ int compare_events(SchedulerEvent* a, SchedulerEvent* b) {
             return 1;
     }
     
-    // Break ties using process ID
     return task_list[a->task_index].task_id - task_list[b->task_index].task_id;
 }
 
@@ -173,7 +171,7 @@ SchedulerEvent event_queue_pop() {
     return result;
 }
 
-// Task initialization
+// Task init
 void initialize_tasks() {
     FILE* input = fopen("proc.txt", "r");
     if (!input) {
@@ -343,7 +341,7 @@ void run_scheduler(int quantum) {
         final_time = system_time;
     }
 
-    // Print statistics
+    // Print stats
     double avg_wait = 0;
     for (int i = 0; i < task_count; i++) {
         avg_wait += task_list[i].queue_time;
@@ -362,6 +360,6 @@ int main() {
     initialize_tasks();
     run_scheduler(TIME_INFINITY);  // FCFS
     run_scheduler(10);            // RR with q=10
-    // run_scheduler(5);             // RR with q=5
+    run_scheduler(5);             // RR with q=5
     return 0;
 }
