@@ -2,9 +2,18 @@
 #include <stdlib.h>
 #include <limits.h>
 
-#define MAX_BURSTS 20  // Maximum number of bursts per process
-#define MAX_PROCESSES 1000  // Maximum number of processes
-#define INF 1000000000  // Used for FCFS scheduling
+#define MAX_BURSTS 20
+#define MAX_PROCESSES 1000
+#define INF 1000000000
+
+// Process states
+typedef enum {
+    STATE_NEW,
+    STATE_READY,
+    STATE_RUNNING,
+    STATE_WAITING,
+    STATE_TERMINATED
+} ProcessState;
 
 // Process Control Block structure
 typedef struct {
@@ -15,6 +24,7 @@ typedef struct {
     int io_bursts[MAX_BURSTS];
     int current_burst;
     int remaining_time;  // Remaining time in current CPU burst
+    ProcessState state;
     int turnaround_time;
     int wait_time;
     int running_time;    // Sum of all CPU and IO bursts
@@ -38,27 +48,42 @@ typedef struct {
 // Global variables
 Process processes[MAX_PROCESSES];
 int n_processes;
-Event event_heap[MAX_PROCESSES * MAX_BURSTS];
+Event event_heap[MAX_PROCESSES * MAX_BURSTS * 4];  // Increased size for all possible events
 int heap_size = 0;
 int ready_queue[MAX_PROCESSES];
 int ready_front = 0, ready_rear = 0;
 int current_time = 0;
 int cpu_idle_time = 0;
-Process* running_process = NULL;
+int current_running_process = -1;
 
-// Helper functions for min-heap (event queue)
+// Helper functions for min-heap
 void swap_events(Event* a, Event* b) {
     Event temp = *a;
     *a = *b;
     *b = temp;
 }
 
+int compare_events(Event* a, Event* b) {
+    if (a->time != b->time) 
+        return a->time - b->time;
+    
+    // If times are equal, handle tie-breaking based on event types
+    if (a->type != b->type) {
+        // Arrival and IO completion have higher priority than timeout
+        if ((a->type == EVENT_ARRIVAL || a->type == EVENT_IO_FINISH) && b->type == EVENT_CPU_TIMEOUT)
+            return -1;
+        if ((b->type == EVENT_ARRIVAL || b->type == EVENT_IO_FINISH) && a->type == EVENT_CPU_TIMEOUT)
+            return 1;
+    }
+    
+    // For same event types, break ties by process ID
+    return processes[a->process_index].id - processes[b->process_index].id;
+}
+
 void heapify_up(int index) {
     while (index > 0) {
         int parent = (index - 1) / 2;
-        if (event_heap[parent].time > event_heap[index].time ||
-            (event_heap[parent].time == event_heap[index].time &&
-             processes[event_heap[parent].process_index].id > processes[event_heap[index].process_index].id)) {
+        if (compare_events(&event_heap[parent], &event_heap[index]) > 0) {
             swap_events(&event_heap[parent], &event_heap[index]);
             index = parent;
         } else {
@@ -73,16 +98,10 @@ void heapify_down(int index) {
         int left = 2 * index + 1;
         int right = 2 * index + 2;
 
-        if (left < heap_size &&
-            (event_heap[left].time < event_heap[smallest].time ||
-             (event_heap[left].time == event_heap[smallest].time &&
-              processes[event_heap[left].process_index].id < processes[event_heap[smallest].process_index].id)))
+        if (left < heap_size && compare_events(&event_heap[left], &event_heap[smallest]) < 0)
             smallest = left;
 
-        if (right < heap_size &&
-            (event_heap[right].time < event_heap[smallest].time ||
-             (event_heap[right].time == event_heap[smallest].time &&
-              processes[event_heap[right].process_index].id < processes[event_heap[smallest].process_index].id)))
+        if (right < heap_size && compare_events(&event_heap[right], &event_heap[smallest]) < 0)
             smallest = right;
 
         if (smallest != index) {
@@ -103,8 +122,8 @@ void insert_event(Event event) {
 Event extract_min_event() {
     Event min_event = event_heap[0];
     heap_size--;
-    event_heap[0] = event_heap[heap_size];
     if (heap_size > 0) {
+        event_heap[0] = event_heap[heap_size];
         heapify_down(0);
     }
     return min_event;
@@ -114,6 +133,7 @@ Event extract_min_event() {
 void enqueue_process(int process_index) {
     ready_queue[ready_rear] = process_index;
     ready_rear = (ready_rear + 1) % MAX_PROCESSES;
+    processes[process_index].state = STATE_READY;
 }
 
 int dequeue_process() {
@@ -127,7 +147,7 @@ int is_ready_queue_empty() {
     return ready_front == ready_rear;
 }
 
-// Read input file and initialize processes
+// Read input file
 void read_input() {
     FILE* fp = fopen("proc.txt", "r");
     if (!fp) {
@@ -138,50 +158,43 @@ void read_input() {
     fscanf(fp, "%d", &n_processes);
     for (int i = 0; i < n_processes; i++) {
         Process* p = &processes[i];
+        p->state = STATE_NEW;
         fscanf(fp, "%d %d", &p->id, &p->arrival_time);
         
+        p->running_time = 0;
         int j = 0;
         while (1) {
             fscanf(fp, "%d", &p->cpu_bursts[j]);
+            p->running_time += p->cpu_bursts[j];
             fscanf(fp, "%d", &p->io_bursts[j]);
             if (p->io_bursts[j] == -1) break;
+            p->running_time += p->io_bursts[j];
             j++;
         }
         p->num_bursts = j + 1;
         p->current_burst = 0;
         p->remaining_time = p->cpu_bursts[0];
-        p->running_time = 0;
-        
-        // Calculate total running time
-        for (int k = 0; k < p->num_bursts; k++) {
-            p->running_time += p->cpu_bursts[k];
-            if (k < p->num_bursts - 1) {
-                p->running_time += p->io_bursts[k];
-            }
-        }
-        
-        // Add arrival event
-        Event arrival_event = {p->arrival_time, i, EVENT_ARRIVAL};
-        insert_event(arrival_event);
+        p->wait_time = 0;
     }
     fclose(fp);
 }
 
-// Schedule next process on CPU
+// Schedule next process
 void schedule_process(int quantum) {
-    if (running_process != NULL || is_ready_queue_empty()) return;
+    if (current_running_process != -1 || is_ready_queue_empty()) return;
     
     int process_index = dequeue_process();
-    running_process = &processes[process_index];
+    current_running_process = process_index;
+    Process* p = &processes[process_index];
+    p->state = STATE_RUNNING;
     
-    int run_time = quantum < running_process->remaining_time ? 
-                   quantum : running_process->remaining_time;
+    int run_time = quantum < p->remaining_time ? quantum : p->remaining_time;
     
     Event next_event;
     next_event.process_index = process_index;
     next_event.time = current_time + run_time;
     
-    if (run_time == running_process->remaining_time) {
+    if (run_time == p->remaining_time) {
         next_event.type = EVENT_CPU_FINISH;
     } else {
         next_event.type = EVENT_CPU_TIMEOUT;
@@ -189,84 +202,90 @@ void schedule_process(int quantum) {
     
     #ifdef VERBOSE
     printf("%d : Process %d is scheduled to run for time %d\n",
-           current_time, running_process->id, run_time);
+           current_time, p->id, run_time);
     #endif
     
     insert_event(next_event);
 }
 
-// Main simulation function
 void simulate(int quantum) {
     printf("**** %s Scheduling %s ****\n",
            quantum == INF ? "FCFS" : "RR",
-           quantum == INF ? "" : "with q = 5");
+           quantum == INF ? "" : quantum == 10 ? "with q = 10" : "with q = 5");
 
     #ifdef VERBOSE
     printf("0 : Starting\n");
     #endif
 
+    // Initialize simulation
     current_time = 0;
     cpu_idle_time = 0;
     heap_size = 0;
     ready_front = ready_rear = 0;
-    running_process = NULL;
+    current_running_process = -1;
     
     // Reset process states
     for (int i = 0; i < n_processes; i++) {
-        processes[i].current_burst = 0;
-        processes[i].remaining_time = processes[i].cpu_bursts[0];
-        processes[i].wait_time = 0;
-        processes[i].turnaround_time = 0;
-        Event arrival_event = {processes[i].arrival_time, i, EVENT_ARRIVAL};
-        insert_event(arrival_event);
+        Process* p = &processes[i];
+        p->current_burst = 0;
+        p->remaining_time = p->cpu_bursts[0];
+        p->wait_time = 0;
+        p->turnaround_time = 0;
+        p->state = STATE_NEW;
+        
+        // Add arrival event
+        Event arrival = {p->arrival_time, i, EVENT_ARRIVAL};
+        insert_event(arrival);
     }
 
-    int completed_processes = 0;
     int last_event_time = 0;
+    int last_busy_time = 0;
 
+    // Main simulation loop
     while (heap_size > 0) {
         Event event = extract_min_event();
         
         // Update CPU idle time
-        if (running_process == NULL) {
+        if (current_running_process == -1) {
             cpu_idle_time += event.time - current_time;
         }
         
         current_time = event.time;
-        Process* process = &processes[event.process_index];
+        Process* p = &processes[event.process_index];
 
         switch (event.type) {
             case EVENT_ARRIVAL:
                 #ifdef VERBOSE
                 printf("%d : Process %d joins ready queue upon arrival\n",
-                       current_time, process->id);
+                       current_time, p->id);
                 #endif
                 enqueue_process(event.process_index);
                 break;
 
             case EVENT_CPU_FINISH:
-                running_process = NULL;
-                process->current_burst++;
+                current_running_process = -1;
+                p->current_burst++;
                 
-                if (process->current_burst == process->num_bursts) {
+                if (p->current_burst == p->num_bursts) {
                     // Process completed
-                    process->turnaround_time = current_time - process->arrival_time;
-                    process->wait_time = process->turnaround_time - process->running_time;
-                    completed_processes++;
+                    p->state = STATE_TERMINATED;
+                    p->turnaround_time = current_time - p->arrival_time;
+                    p->wait_time = p->turnaround_time - p->running_time;
                     
                     printf("%d : Process %d exits. Turnaround time = %d (%d%%), Wait time = %d\n",
-                           current_time, process->id,
-                           process->turnaround_time,
-                           (process->turnaround_time * 100) / process->running_time,
-                           process->wait_time);
+                           current_time, p->id,
+                           p->turnaround_time,
+                           (p->turnaround_time * 100) / p->running_time,
+                           p->wait_time);
                     
                     #ifdef VERBOSE
                     printf("%d : CPU goes idle\n", current_time);
                     #endif
                 } else {
                     // Schedule IO burst
+                    p->state = STATE_WAITING;
                     Event io_finish = {
-                        current_time + process->io_bursts[process->current_burst - 1],
+                        current_time + p->io_bursts[p->current_burst - 1],
                         event.process_index,
                         EVENT_IO_FINISH
                     };
@@ -275,20 +294,20 @@ void simulate(int quantum) {
                 break;
 
             case EVENT_IO_FINISH:
-                process->remaining_time = process->cpu_bursts[process->current_burst];
+                p->remaining_time = p->cpu_bursts[p->current_burst];
                 #ifdef VERBOSE
                 printf("%d : Process %d joins ready queue after IO completion\n",
-                       current_time, process->id);
+                       current_time, p->id);
                 #endif
                 enqueue_process(event.process_index);
                 break;
 
             case EVENT_CPU_TIMEOUT:
-                running_process = NULL;
-                process->remaining_time -= quantum;
+                current_running_process = -1;
+                p->remaining_time -= quantum;
                 #ifdef VERBOSE
                 printf("%d : Process %d joins ready queue after timeout\n",
-                       current_time, process->id);
+                       current_time, p->id);
                 #endif
                 enqueue_process(event.process_index);
                 break;
@@ -296,9 +315,12 @@ void simulate(int quantum) {
 
         schedule_process(quantum);
         last_event_time = current_time;
+        if (current_running_process != -1) {
+            last_busy_time = current_time;
+        }
     }
 
-    // Print final statistics
+    // Print statistics
     double avg_wait_time = 0;
     for (int i = 0; i < n_processes; i++) {
         avg_wait_time += processes[i].wait_time;
@@ -310,20 +332,19 @@ void simulate(int quantum) {
     printf("CPU idle time = %d\n", cpu_idle_time);
     printf("CPU utilization = %.2f%%\n", 
            (100.0 * (last_event_time - cpu_idle_time)) / last_event_time);
+    printf("\n");
 }
 
 int main() {
     read_input();
     
-    // Simulate FCFS (RR with infinite quantum)
+    // FCFS scheduling (RR with infinite quantum)
     simulate(INF);
-    printf("\n");
     
-    // Simulate RR with quantum = 10
+    // RR scheduling with quantum = 10
     simulate(10);
-    printf("\n");
     
-    // Simulate RR with quantum = 5
+    // RR scheduling with quantum = 5 
     simulate(5);
     
     return 0;
