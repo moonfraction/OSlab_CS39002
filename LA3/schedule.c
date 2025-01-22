@@ -208,6 +208,14 @@ void schedule_process(int quantum) {
     insert_event(next_event);
 }
 
+void check_cpu_idle() {
+    #ifdef VERBOSE
+    if (current_running_process == -1 && is_ready_queue_empty()) {
+        printf("%d : CPU goes idle\n", current_time);
+    }
+    #endif
+}
+
 void simulate(int quantum) {
     printf("**** %s Scheduling %s ****\n",
            quantum == INF ? "FCFS" : "RR",
@@ -239,7 +247,7 @@ void simulate(int quantum) {
     }
 
     int last_event_time = 0;
-    int last_busy_time = 0;
+    int prev_time = 0;
 
     // Main simulation loop
     while (heap_size > 0) {
@@ -277,10 +285,6 @@ void simulate(int quantum) {
                            p->turnaround_time,
                            (p->turnaround_time * 100) / p->running_time,
                            p->wait_time);
-                    
-                    #ifdef VERBOSE
-                    printf("%d : CPU goes idle\n", current_time);
-                    #endif
                 } else {
                     // Schedule IO burst
                     p->state = STATE_WAITING;
@@ -291,6 +295,7 @@ void simulate(int quantum) {
                     };
                     insert_event(io_finish);
                 }
+                check_cpu_idle();
                 break;
 
             case EVENT_IO_FINISH:
@@ -315,9 +320,6 @@ void simulate(int quantum) {
 
         schedule_process(quantum);
         last_event_time = current_time;
-        if (current_running_process != -1) {
-            last_busy_time = current_time;
-        }
     }
 
     // Print statistics
