@@ -2,352 +2,329 @@
 #include <stdlib.h>
 #include <limits.h>
 
-#define MAX_BURSTS 20
-#define MAX_PROCESSES 1000
-#define INF 1000000000
+#define BURST_LIMIT 25
+#define PROC_LIMIT 1500
+#define TIME_INFINITY 1000000000
 
-// Process states
 typedef enum {
-    STATE_NEW,
-    STATE_READY,
-    STATE_RUNNING,
-    STATE_WAITING,
-    STATE_TERMINATED
-} ProcessState;
+    PROC_INIT,
+    PROC_QUEUED,
+    PROC_ACTIVE,
+    PROC_BLOCKED,
+    PROC_DONE
+} ProcStatus;
 
-// Process Control Block structure
 typedef struct {
-    int id;
-    int arrival_time;
-    int num_bursts;
-    int cpu_bursts[MAX_BURSTS];
-    int io_bursts[MAX_BURSTS];
-    int current_burst;
-    int remaining_time;  // Remaining time in current CPU burst
-    ProcessState state;
-    int turnaround_time;
-    int wait_time;
-    int running_time;    // Sum of all CPU and IO bursts
-} Process;
+    int task_id;
+    int start_time;
+    int burst_count;
+    int compute_times[BURST_LIMIT];
+    int wait_times[BURST_LIMIT];
+    int burst_index;
+    int time_left;
+    ProcStatus status;
+    int completion_time;
+    int queue_time;
+    int activity_time;
+} Task;
 
-// Event types
 typedef enum {
-    EVENT_ARRIVAL,
-    EVENT_CPU_FINISH,
-    EVENT_IO_FINISH,
-    EVENT_CPU_TIMEOUT
-} EventType;
+    EVT_START,
+    EVT_COMPLETE,
+    EVT_UNBLOCK,
+    EVT_PREEMPT
+} EventCategory;
 
-// Event structure
 typedef struct {
-    int time;
-    int process_index;
-    EventType type;
-} Event;
+    int timestamp;
+    int task_index;
+    EventCategory category;
+} SchedulerEvent;
 
-// Global variables
-Process processes[MAX_PROCESSES];
-int n_processes;
-Event event_heap[MAX_PROCESSES * MAX_BURSTS * 4];  // Increased size for all possible events
-int heap_size = 0;
-int ready_queue[MAX_PROCESSES];
-int ready_front = 0, ready_rear = 0;
-int current_time = 0;
-int cpu_idle_time = 0;
-int current_running_process = -1;
+// System state variables
+Task task_list[PROC_LIMIT];
+int task_count;
+SchedulerEvent event_queue[PROC_LIMIT * BURST_LIMIT * 4];
+int queue_size = 0;
+int ready_list[PROC_LIMIT];
+int list_head = 0, list_tail = 0;
+int system_time = 0;
+int idle_periods = 0;
+int running_task = -1;
 
-// Helper functions for min-heap
-void swap_events(Event* a, Event* b) {
-    Event temp = *a;
-    *a = *b;
-    *b = temp;
+// Event queue management
+void exchange_events(SchedulerEvent* first, SchedulerEvent* second) {
+    SchedulerEvent temp = *first;
+    *first = *second;
+    *second = temp;
 }
 
-int compare_events(Event* a, Event* b) {
-    if (a->time != b->time) 
-        return a->time - b->time;
+int prioritize_events(SchedulerEvent* first, SchedulerEvent* second) {
+    if (first->timestamp != second->timestamp) 
+        return first->timestamp - second->timestamp;
     
-    // If times are equal, handle tie-breaking based on event types
-    if (a->type != b->type) {
-        // Arrival and IO completion have higher priority than timeout
-        if ((a->type == EVENT_ARRIVAL || a->type == EVENT_IO_FINISH) && b->type == EVENT_CPU_TIMEOUT)
+    if (first->category != second->category) {
+        if ((first->category == EVT_START || first->category == EVT_UNBLOCK) && 
+            second->category == EVT_PREEMPT)
             return -1;
-        if ((b->type == EVENT_ARRIVAL || b->type == EVENT_IO_FINISH) && a->type == EVENT_CPU_TIMEOUT)
+        if ((second->category == EVT_START || second->category == EVT_UNBLOCK) && 
+            first->category == EVT_PREEMPT)
             return 1;
     }
     
-    // For same event types, break ties by process ID
-    return processes[a->process_index].id - processes[b->process_index].id;
+    return task_list[first->task_index].task_id - task_list[second->task_index].task_id;
 }
 
-void heapify_up(int index) {
-    while (index > 0) {
-        int parent = (index - 1) / 2;
-        if (compare_events(&event_heap[parent], &event_heap[index]) > 0) {
-            swap_events(&event_heap[parent], &event_heap[index]);
-            index = parent;
+void bubble_up(int position) {
+    while (position > 0) {
+        int parent = (position - 1) / 2;
+        if (prioritize_events(&event_queue[parent], &event_queue[position]) > 0) {
+            exchange_events(&event_queue[parent], &event_queue[position]);
+            position = parent;
         } else {
             break;
         }
     }
 }
 
-void heapify_down(int index) {
+void sink_down(int position) {
     while (1) {
-        int smallest = index;
-        int left = 2 * index + 1;
-        int right = 2 * index + 2;
+        int min_pos = position;
+        int left_child = 2 * position + 1;
+        int right_child = 2 * position + 2;
 
-        if (left < heap_size && compare_events(&event_heap[left], &event_heap[smallest]) < 0)
-            smallest = left;
+        if (left_child < queue_size && 
+            prioritize_events(&event_queue[left_child], &event_queue[min_pos]) < 0)
+            min_pos = left_child;
 
-        if (right < heap_size && compare_events(&event_heap[right], &event_heap[smallest]) < 0)
-            smallest = right;
+        if (right_child < queue_size && 
+            prioritize_events(&event_queue[right_child], &event_queue[min_pos]) < 0)
+            min_pos = right_child;
 
-        if (smallest != index) {
-            swap_events(&event_heap[index], &event_heap[smallest]);
-            index = smallest;
+        if (min_pos != position) {
+            exchange_events(&event_queue[position], &event_queue[min_pos]);
+            position = min_pos;
         } else {
             break;
         }
     }
 }
 
-void insert_event(Event event) {
-    event_heap[heap_size] = event;
-    heapify_up(heap_size);
-    heap_size++;
+void schedule_event(SchedulerEvent evt) {
+    event_queue[queue_size] = evt;
+    bubble_up(queue_size);
+    queue_size++;
 }
 
-Event extract_min_event() {
-    Event min_event = event_heap[0];
-    heap_size--;
-    if (heap_size > 0) {
-        event_heap[0] = event_heap[heap_size];
-        heapify_down(0);
+SchedulerEvent get_next_event() {
+    SchedulerEvent next = event_queue[0];
+    queue_size--;
+    if (queue_size > 0) {
+        event_queue[0] = event_queue[queue_size];
+        sink_down(0);
     }
-    return min_event;
+    return next;
 }
 
-// Ready queue operations
-void enqueue_process(int process_index) {
-    ready_queue[ready_rear] = process_index;
-    ready_rear = (ready_rear + 1) % MAX_PROCESSES;
-    processes[process_index].state = STATE_READY;
+// Ready list ops
+void append_task(int task_index) {
+    ready_list[list_tail] = task_index;
+    list_tail = (list_tail + 1) % PROC_LIMIT;
+    task_list[task_index].status = PROC_QUEUED;
 }
 
-int dequeue_process() {
-    if (ready_front == ready_rear) return -1;
-    int process_index = ready_queue[ready_front];
-    ready_front = (ready_front + 1) % MAX_PROCESSES;
-    return process_index;
+int remove_next_task() {
+    if (list_head == list_tail) return -1;
+    int task_index = ready_list[list_head];
+    list_head = (list_head + 1) % PROC_LIMIT;
+    return task_index;
 }
 
-int is_ready_queue_empty() {
-    return ready_front == ready_rear;
+int is_list_empty() {
+    return list_head == list_tail;
 }
 
-// Read input file
-void read_input() {
-    FILE* fp = fopen("proc.txt", "r");
-    if (!fp) {
-        printf("Error opening proc.txt\n");
+// Task data initialization
+void initialize_tasks() {
+    FILE* input = fopen("proc.txt", "r");
+    if (!input) {
+        printf("Failed to open proc.txt\n");
         exit(1);
     }
 
-    fscanf(fp, "%d", &n_processes);
-    for (int i = 0; i < n_processes; i++) {
-        Process* p = &processes[i];
-        p->state = STATE_NEW;
-        fscanf(fp, "%d %d", &p->id, &p->arrival_time);
+    fscanf(input, "%d", &task_count);
+    for (int i = 0; i < task_count; i++) {
+        Task* t = &task_list[i];
+        t->status = PROC_INIT;
+        fscanf(input, "%d %d", &t->task_id, &t->start_time);
         
-        p->running_time = 0;
+        t->activity_time = 0;
         int j = 0;
         while (1) {
-            fscanf(fp, "%d", &p->cpu_bursts[j]);
-            p->running_time += p->cpu_bursts[j];
-            fscanf(fp, "%d", &p->io_bursts[j]);
-            if (p->io_bursts[j] == -1) break;
-            p->running_time += p->io_bursts[j];
+            fscanf(input, "%d", &t->compute_times[j]);
+            t->activity_time += t->compute_times[j];
+            fscanf(input, "%d", &t->wait_times[j]);
+            if (t->wait_times[j] == -1) break;
+            t->activity_time += t->wait_times[j];
             j++;
         }
-        p->num_bursts = j + 1;
-        p->current_burst = 0;
-        p->remaining_time = p->cpu_bursts[0];
-        p->wait_time = 0;
+        t->burst_count = j + 1;
+        t->burst_index = 0;
+        t->time_left = t->compute_times[0];
+        t->queue_time = 0;
     }
-    fclose(fp);
+    fclose(input);
 }
 
-// Schedule next process
-void schedule_process(int quantum) {
-    if (current_running_process != -1 || is_ready_queue_empty()) return;
+// Task scheduling
+void select_next_task(int quantum) {
+    if (running_task != -1 || is_list_empty()) return;
     
-    int process_index = dequeue_process();
-    current_running_process = process_index;
-    Process* p = &processes[process_index];
-    p->state = STATE_RUNNING;
+    int next_task = remove_next_task();
+    running_task = next_task;
+    Task* t = &task_list[next_task];
+    t->status = PROC_ACTIVE;
     
-    int run_time = quantum < p->remaining_time ? quantum : p->remaining_time;
+    int duration = quantum < t->time_left ? quantum : t->time_left;
     
-    Event next_event;
-    next_event.process_index = process_index;
-    next_event.time = current_time + run_time;
-    
-    if (run_time == p->remaining_time) {
-        next_event.type = EVENT_CPU_FINISH;
-    } else {
-        next_event.type = EVENT_CPU_TIMEOUT;
-    }
+    SchedulerEvent next_evt;
+    next_evt.task_index = next_task;
+    next_evt.timestamp = system_time + duration;
+    next_evt.category = (duration == t->time_left) ? EVT_COMPLETE : EVT_PREEMPT;
     
     #ifdef VERBOSE
     printf("%d : Process %d is scheduled to run for time %d\n",
-           current_time, p->id, run_time);
+           system_time, t->task_id, duration);
     #endif
     
-    insert_event(next_event);
+    schedule_event(next_evt);
 }
 
-void check_cpu_idle() {
+void check_idle_state() {
     #ifdef VERBOSE
-    if (current_running_process == -1 && is_ready_queue_empty()) {
-        printf("%d : CPU goes idle\n", current_time);
+    if (running_task == -1 && is_list_empty()) {
+        printf("%d : CPU goes idle\n", system_time);
     }
     #endif
 }
 
-void simulate(int quantum) {
+// simulation
+void run_scheduler(int quantum) {
     printf("**** %s Scheduling %s ****\n",
-           quantum == INF ? "FCFS" : "RR",
-           quantum == INF ? "" : quantum == 10 ? "with q = 10" : "with q = 5");
+           quantum == TIME_INFINITY ? "FCFS" : "RR",
+           quantum == TIME_INFINITY ? "" : quantum == 10 ? "with q = 10" : "with q = 5");
 
     #ifdef VERBOSE
     printf("0 : Starting\n");
     #endif
 
-    // Initialize simulation
-    current_time = 0;
-    cpu_idle_time = 0;
-    heap_size = 0;
-    ready_front = ready_rear = 0;
-    current_running_process = -1;
+    system_time = 0;
+    idle_periods = 0;
+    queue_size = 0;
+    list_head = list_tail = 0;
+    running_task = -1;
     
-    // Reset process states
-    for (int i = 0; i < n_processes; i++) {
-        Process* p = &processes[i];
-        p->current_burst = 0;
-        p->remaining_time = p->cpu_bursts[0];
-        p->wait_time = 0;
-        p->turnaround_time = 0;
-        p->state = STATE_NEW;
+    for (int i = 0; i < task_count; i++) {
+        Task* t = &task_list[i];
+        t->burst_index = 0;
+        t->time_left = t->compute_times[0];
+        t->queue_time = 0;
+        t->completion_time = 0;
+        t->status = PROC_INIT;
         
-        // Add arrival event
-        Event arrival = {p->arrival_time, i, EVENT_ARRIVAL};
-        insert_event(arrival);
+        SchedulerEvent evt = {t->start_time, i, EVT_START};
+        schedule_event(evt);
     }
 
-    int last_event_time = 0;
-    int prev_time = 0;
+    int final_time = 0;
 
-    // Main simulation loop
-    while (heap_size > 0) {
-        Event event = extract_min_event();
+    while (queue_size > 0) {
+        SchedulerEvent evt = get_next_event();
         
-        // Update CPU idle time
-        if (current_running_process == -1) {
-            cpu_idle_time += event.time - current_time;
+        if (running_task == -1) {
+            idle_periods += evt.timestamp - system_time;
         }
         
-        current_time = event.time;
-        Process* p = &processes[event.process_index];
+        system_time = evt.timestamp;
+        Task* t = &task_list[evt.task_index];
 
-        switch (event.type) {
-            case EVENT_ARRIVAL:
+        switch (evt.category) {
+            case EVT_START:
                 #ifdef VERBOSE
                 printf("%d : Process %d joins ready queue upon arrival\n",
-                       current_time, p->id);
+                       system_time, t->task_id);
                 #endif
-                enqueue_process(event.process_index);
+                append_task(evt.task_index);
                 break;
 
-            case EVENT_CPU_FINISH:
-                current_running_process = -1;
-                p->current_burst++;
+            case EVT_COMPLETE:
+                running_task = -1;
+                t->burst_index++;
                 
-                if (p->current_burst == p->num_bursts) {
-                    // Process completed
-                    p->state = STATE_TERMINATED;
-                    p->turnaround_time = current_time - p->arrival_time;
-                    p->wait_time = p->turnaround_time - p->running_time;
+                if (t->burst_index == t->burst_count) {
+                    t->status = PROC_DONE;
+                    t->completion_time = system_time - t->start_time;
+                    t->queue_time = t->completion_time - t->activity_time;
                     
                     printf("%d : Process %d exits. Turnaround time = %d (%d%%), Wait time = %d\n",
-                           current_time, p->id,
-                           p->turnaround_time,
-                           (p->turnaround_time * 100) / p->running_time,
-                           p->wait_time);
+                           system_time, t->task_id,
+                           t->completion_time,
+                           (t->completion_time * 100) / t->activity_time,
+                           t->queue_time);
                 } else {
-                    // Schedule IO burst
-                    p->state = STATE_WAITING;
-                    Event io_finish = {
-                        current_time + p->io_bursts[p->current_burst - 1],
-                        event.process_index,
-                        EVENT_IO_FINISH
+                    t->status = PROC_BLOCKED;
+                    SchedulerEvent unblock = {
+                        system_time + t->wait_times[t->burst_index - 1],
+                        evt.task_index,
+                        EVT_UNBLOCK
                     };
-                    insert_event(io_finish);
+                    schedule_event(unblock);
                 }
-                check_cpu_idle();
+                check_idle_state();
                 break;
 
-            case EVENT_IO_FINISH:
-                p->remaining_time = p->cpu_bursts[p->current_burst];
+            case EVT_UNBLOCK:
+                t->time_left = t->compute_times[t->burst_index];
                 #ifdef VERBOSE
                 printf("%d : Process %d joins ready queue after IO completion\n",
-                       current_time, p->id);
+                       system_time, t->task_id);
                 #endif
-                enqueue_process(event.process_index);
+                append_task(evt.task_index);
                 break;
 
-            case EVENT_CPU_TIMEOUT:
-                current_running_process = -1;
-                p->remaining_time -= quantum;
+            case EVT_PREEMPT:
+                running_task = -1;
+                t->time_left -= quantum;
                 #ifdef VERBOSE
                 printf("%d : Process %d joins ready queue after timeout\n",
-                       current_time, p->id);
+                       system_time, t->task_id);
                 #endif
-                enqueue_process(event.process_index);
+                append_task(evt.task_index);
                 break;
         }
 
-        schedule_process(quantum);
-        last_event_time = current_time;
+        select_next_task(quantum);
+        final_time = system_time;
     }
 
-    // Print statistics
-    double avg_wait_time = 0;
-    for (int i = 0; i < n_processes; i++) {
-        avg_wait_time += processes[i].wait_time;
+    double avg_wait = 0;
+    for (int i = 0; i < task_count; i++) {
+        avg_wait += task_list[i].queue_time;
     }
-    avg_wait_time /= n_processes;
+    avg_wait /= task_count;
 
-    printf("Average wait time = %.2f\n", avg_wait_time);
-    printf("Total turnaround time = %d\n", last_event_time);
-    printf("CPU idle time = %d\n", cpu_idle_time);
+    printf("Average wait time = %.2f\n", avg_wait);
+    printf("Total turnaround time = %d\n", final_time);
+    printf("CPU idle time = %d\n", idle_periods);
     printf("CPU utilization = %.2f%%\n", 
-           (100.0 * (last_event_time - cpu_idle_time)) / last_event_time);
+           (100.0 * (final_time - idle_periods)) / final_time);
     printf("\n");
 }
 
 int main() {
-    read_input();
-    
-    // FCFS scheduling (RR with infinite quantum)
-    simulate(INF);
-    
-    // RR scheduling with quantum = 10
-    simulate(10);
-    
-    // RR scheduling with quantum = 5 
-    simulate(5);
-    
+    initialize_tasks();
+    run_scheduler(TIME_INFINITY);  // FCFS
+    run_scheduler(10);            // RR with q=10
+    run_scheduler(5);             // RR with q=5
     return 0;
 }
