@@ -2,19 +2,22 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <time.h>
 
 #define BLOCK_SIZE 3
 
-void draw_block(int block[BLOCK_SIZE][BLOCK_SIZE]) {
+// Function to draw the 3x3 block
+void draw_block(int block_num, int board[BLOCK_SIZE][BLOCK_SIZE]) {
     printf("\033[H\033[J");  // Clear screen
+    printf("Block %d:\n", block_num);
     printf("+---+---+---+\n");
     for (int i = 0; i < BLOCK_SIZE; i++) {
         printf("|");
         for (int j = 0; j < BLOCK_SIZE; j++) {
-            if (block[i][j] == 0)
+            if (board[i][j] == 0)
                 printf(" . ");
             else
-                printf(" %d ", block[i][j]);
+                printf(" %d ", board[i][j]);
             printf("|");
         }
         printf("\n");
@@ -22,161 +25,166 @@ void draw_block(int block[BLOCK_SIZE][BLOCK_SIZE]) {
             printf("+---+---+---+\n");
     }
     printf("+---+---+---+\n");
+    fflush(stdout);
 }
 
-void print_error(const char *msg) {
-    printf("\n%s\n", msg);
+// Function to print error message and redraw after delay
+void show_error(const char *message, int block_num, int board[BLOCK_SIZE][BLOCK_SIZE]) {
+    printf("%s\n", message);
     fflush(stdout);
     sleep(2);
+    draw_block(block_num, board);
 }
-
-int check_row_conflict(int row[BLOCK_SIZE], int digit) {
-    for (int i = 0; i < BLOCK_SIZE; i++) {
-        if (row[i] == digit) return 1;
-    }
-    return 0;
-}
-
-int check_col_conflict(int block[BLOCK_SIZE][BLOCK_SIZE], int col, int digit) {
-    for (int i = 0; i < BLOCK_SIZE; i++) {
-        if (block[i][col] == digit) return 1;
-    }
-    return 0;
-}
-
 
 int main(int argc, char *argv[]) {
     if (argc != 8) {
-        fprintf(stderr, "Usage: %s block_num fd_in fd_out rn1 rn2 cn1 cn2\n", argv[0]);
+        fprintf(stderr, "Usage: %s block_num read_fd write_fd "
+                "row_n1_fd row_n2_fd col_n1_fd col_n2_fd\n", argv[0]);
         exit(1);
     }
-
+    
     int block_num = atoi(argv[1]);
-    int fd_in = atoi(argv[2]);
-    int fd_out = atoi(argv[3]);
-    int rn1_out = atoi(argv[4]);
-    int rn2_out = atoi(argv[5]);
-    int cn1_out = atoi(argv[6]);
-    int cn2_out = atoi(argv[7]);
-
-    // Redirect stdin to pipe input
-    dup2(fd_in, STDIN_FILENO);
-    close(fd_in);
-
-    // Set pipes to be unbuffered
-    setvbuf(stdin, NULL, _IONBF, 0);
-    setvbuf(stdout, NULL, _IONBF, 0);
-
-    int A[BLOCK_SIZE][BLOCK_SIZE] = {{0}};  // Original puzzle
-    int B[BLOCK_SIZE][BLOCK_SIZE] = {{0}};  // Current state
-
-    char cmd;
-    int running = 1;
-
-    while (running && scanf(" %c", &cmd) == 1) {
-        switch (cmd) {
+    int read_fd = atoi(argv[2]);
+    int write_fd = atoi(argv[3]);
+    int row_n1_fd = atoi(argv[4]);
+    int row_n2_fd = atoi(argv[5]);
+    int col_n1_fd = atoi(argv[6]);
+    int col_n2_fd = atoi(argv[7]);
+    
+    // Arrays to store original puzzle and current state
+    int original[BLOCK_SIZE][BLOCK_SIZE] = {{0}};
+    int current[BLOCK_SIZE][BLOCK_SIZE] = {{0}};
+    
+    // Redirect stdin to pipe
+    if (dup2(read_fd, STDIN_FILENO) == -1) {
+        perror("dup2 failed");
+        exit(1);
+    }
+    close(read_fd);
+    
+    char command;
+    while (scanf(" %c", &command) != EOF) {
+        switch (command) {
             case 'n': {
-                // Receive initial block state
+                // Read new board state
                 for (int i = 0; i < BLOCK_SIZE; i++) {
                     for (int j = 0; j < BLOCK_SIZE; j++) {
-                        scanf("%d", &A[i][j]);
-                        B[i][j] = A[i][j];
+                        scanf("%d", &original[i][j]);
+                        current[i][j] = original[i][j];
                     }
                 }
-                draw_block(B);
+                draw_block(block_num, current);
                 break;
             }
-
+                
             case 'p': {
                 int cell, digit;
                 scanf("%d %d", &cell, &digit);
                 int row = cell / 3;
                 int col = cell % 3;
-
-                // Check if trying to modify original puzzle cell
-                if (A[row][col] != 0) {
-                    print_error("Read-only cell");
-                    draw_block(B);
-                    break;
-                }
-
-                // Check block conflict
-                if (check_row_conflict(B[row], digit) || 
-                    check_col_conflict(B, col, digit)) {
-                    print_error("Block conflict");
-                    draw_block(B);
-                    break;
-                }
-
-                // Check row conflicts with neighbors
-                int row_global = (block_num / 3) * 3 + row;
-                dprintf(rn1_out, "r %d %d\n", row, digit);
-                fsync(rn1_out);  // Force flush
-                dprintf(rn2_out, "r %d %d\n", row, digit);
-                fsync(rn2_out);  // Force flush
                 
+                // Check if cell is in original puzzle
+                if (original[row][col] != 0) {
+                    show_error("Read-only cell", block_num, current);
+                    continue;
+                }
+                
+                // Check for block conflicts
+                int has_conflict = 0;
+                for (int i = 0; i < BLOCK_SIZE && !has_conflict; i++) {
+                    for (int j = 0; j < BLOCK_SIZE; j++) {
+                        if (current[i][j] == digit) {
+                            has_conflict = 1;
+                            break;
+                        }
+                    }
+                }
+                if (has_conflict) {
+                    show_error("Block conflict", block_num, current);
+                    continue;
+                }
+                
+                // Check row conflicts
+                dprintf(row_n1_fd, "r %d %d %d\n", row, digit, write_fd);
+                dprintf(row_n2_fd, "r %d %d %d\n", row, digit, write_fd);
                 int response;
                 scanf("%d", &response);
-                if (response) {
-                    print_error("Row conflict");
-                    draw_block(B);
-                    break;
+                if (response != 0) {
+                    show_error("Row conflict", block_num, current);
+                    continue;
                 }
                 scanf("%d", &response);
-                if (response) {
-                    print_error("Row conflict");
-                    draw_block(B);
-                    break;
+                if (response != 0) {
+                    show_error("Row conflict", block_num, current);
+                    continue;
                 }
-
-                // Check column conflicts with neighbors
-                int col_global = (block_num % 3) * 3 + col;
-                dprintf(cn1_out, "c %d %d\n", col, digit);
-                fsync(cn1_out);  // Force flush
-                dprintf(cn2_out, "c %d %d\n", col, digit);
-                fsync(cn2_out);  // Force flush
                 
+                // Check column conflicts
+                dprintf(col_n1_fd, "c %d %d %d\n", col, digit, write_fd);
+                dprintf(col_n2_fd, "c %d %d %d\n", col, digit, write_fd);
                 scanf("%d", &response);
-                if (response) {
-                    print_error("Column conflict");
-                    draw_block(B);
-                    break;
+                if (response != 0) {
+                    show_error("Column conflict", block_num, current);
+                    continue;
                 }
                 scanf("%d", &response);
-                if (response) {
-                    print_error("Column conflict");
-                    draw_block(B);
-                    break;
+                if (response != 0) {
+                    show_error("Column conflict", block_num, current);
+                    continue;
                 }
-
+                
                 // If no conflicts, update the cell
-                B[row][col] = digit;
-                draw_block(B);
+                current[row][col] = digit;
+                draw_block(block_num, current);
                 break;
             }
-
+                
             case 'r': {
-                int row, digit;
-                scanf("%d %d", &row, &digit);
-                int conflict = check_row_conflict(B[row], digit);
-                dprintf(fd_out, "%d\n", conflict);
+                int row, digit, resp_fd;
+                scanf("%d %d %d", &row, &digit, &resp_fd);
+                int has_conflict = 0;
+                for (int j = 0; j < BLOCK_SIZE; j++) {
+                    if (current[row][j] == digit) {
+                        has_conflict = 1;
+                        break;
+                    }
+                }
+                dprintf(resp_fd, "%d\n", has_conflict);
                 break;
             }
-
+                
             case 'c': {
-                int col, digit;
-                scanf("%d %d", &col, &digit);
-                int conflict = check_col_conflict(B, col, digit);
-                dprintf(fd_out, "%d\n", conflict);
+                int col, digit, resp_fd;
+                scanf("%d %d %d", &col, &digit, &resp_fd);
+                int has_conflict = 0;
+                for (int i = 0; i < BLOCK_SIZE; i++) {
+                    if (current[i][col] == digit) {
+                        has_conflict = 1;
+                        break;
+                    }
+                }
+                dprintf(resp_fd, "%d\n", has_conflict);
                 break;
             }
-
-            case 'q':
-                print_error("Bye...");
-                running = 0;
+                
+            case 'q': {
+                printf("\nBye from Block %d...\n", block_num);
+                fflush(stdout);
+                sleep(2);
+                // Close all pipe file descriptors
+                close(write_fd);
+                close(row_n1_fd);
+                close(row_n2_fd);
+                close(col_n1_fd);
+                close(col_n2_fd);
+                exit(0);
                 break;
+            }
+                
+            // default:
+            //     fprintf(stderr, "Block %d: Unknown command '%c'\n", block_num, command);
         }
     }
-
+    
     return 0;
 }
