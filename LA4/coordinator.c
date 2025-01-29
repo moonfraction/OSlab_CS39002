@@ -178,6 +178,8 @@ int main() {
                 newboard(A, S);
                 // Send initial board state to each block
                 for (int block = 0; block < BLOCK_COUNT; block++) {
+                    // man dprintf
+                    // dprintf() and vdprintf() write output to the given file descriptor
                     dprintf(pipes[block].write_fd, "n ");
                     int row_start = (block / 3) * 3;
                     int col_start = (block % 3) * 3;
