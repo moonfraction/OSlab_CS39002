@@ -207,11 +207,19 @@ int main() {
             }
                 
             case 's': {
-                // Send solution to each block
+                // Send both original and solution boards
                 for (int block = 0; block < BLOCK_COUNT; block++) {
-                    dprintf(pipes[block].write_fd, "n ");
+                    dprintf(pipes[block].write_fd, "s ");
                     int row_start = (block / 3) * 3;
                     int col_start = (block % 3) * 3;
+                    // Send original board first
+                    for (int i = 0; i < 3; i++) {
+                        for (int j = 0; j < 3; j++) {
+                            dprintf(pipes[block].write_fd, "%d ", 
+                                    A[row_start + i][col_start + j]);
+                        }
+                    }
+                    // Send solution board
                     for (int i = 0; i < 3; i++) {
                         for (int j = 0; j < 3; j++) {
                             dprintf(pipes[block].write_fd, "%d ", 

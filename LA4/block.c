@@ -35,6 +35,32 @@ void draw_block(int block_num, int board[BLOCK_SIZE][BLOCK_SIZE], int original[B
     fflush(stdout);
 }
 
+void draw_solution(int block_num, int original[BLOCK_SIZE][BLOCK_SIZE], int solution[BLOCK_SIZE][BLOCK_SIZE]) {
+    printf("\033[H\033[J");  // Clear screen
+    printf("Block %d (Solution):\n", block_num);
+    printf("+---+---+---+\n");
+    for (int i = 0; i < BLOCK_SIZE; i++) {
+        printf("|");
+        for (int j = 0; j < BLOCK_SIZE; j++) {
+            if (original[i][j] != 0) {
+                // Red for original numbers
+                printf(" \033[31m%d\033[0m ", original[i][j]);
+            } else if (solution[i][j] != 0) {
+                // Green for solution numbers
+                printf(" \033[32m%d\033[0m ", solution[i][j]);
+            } else {
+                printf(" . ");
+            }
+            printf("|");
+        }
+        printf("\n");
+        if (i < BLOCK_SIZE - 1)
+            printf("+---+---+---+\n");
+    }
+    printf("+---+---+---+\n");
+    fflush(stdout);
+}
+
 // Function to print error message and redraw after delay
 void show_error(const char *message, int block_num, int board[BLOCK_SIZE][BLOCK_SIZE], int original[BLOCK_SIZE][BLOCK_SIZE]) {
     printf("%s\n", message);
@@ -184,7 +210,7 @@ int main(int argc, char *argv[]) {
             }
                 
             case 'q': {
-                printf("\nBye B%d...\n", block_num);
+                printf("\nBye from B%d...\n", block_num);
                 fflush(stdout);
                 sleep(2);
                 // Close all pipe file descriptors
@@ -197,8 +223,23 @@ int main(int argc, char *argv[]) {
                 break;
             }
                 
-            // default:
-            //     fprintf(stderr, "Block %d: Unknown command '%c'\n", block_num, command);
+            case 's': {
+                int solution[BLOCK_SIZE][BLOCK_SIZE] = {{0}};
+                // Read original board
+                for (int i = 0; i < BLOCK_SIZE; i++) {
+                    for (int j = 0; j < BLOCK_SIZE; j++) {
+                        scanf("%d", &original[i][j]);
+                    }
+                }
+                // Read solution board
+                for (int i = 0; i < BLOCK_SIZE; i++) {
+                    for (int j = 0; j < BLOCK_SIZE; j++) {
+                        scanf("%d", &solution[i][j]);
+                    }
+                }
+                draw_solution(block_num, original, solution);
+                break;
+            }
         }
     }
     
