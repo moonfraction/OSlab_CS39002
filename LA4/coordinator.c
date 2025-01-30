@@ -5,7 +5,6 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include "boardgen.c"
-#include <stdarg.h>
 
 #define BLOCK_COUNT 9
 #define BLOCK_SIZE 3
@@ -16,31 +15,8 @@ typedef struct {
     int write_fd;
 } PipePair;
 
-// original stdout for later use
 static int original_stdout;
 
-void write_to_pipe(int fd, const char *format, ...) {
-    va_list args;
-    int saved_stdout;
-    
-    // Save current stdout
-    saved_stdout = dup(STDOUT_FILENO);
-    
-    // Redirect stdout to pipe
-    dup2(fd, STDOUT_FILENO);
-    
-    // Write to pipe using printf
-    va_start(args, format);
-    vprintf(format, args);
-    va_end(args);
-    fflush(stdout);
-    
-    // Restore original stdout
-    dup2(saved_stdout, STDOUT_FILENO);
-    close(saved_stdout);
-}
-
-// Rest of the helper functions remain the same
 void get_row_neighbors(int block, int *n1, int *n2) {
     int row = block / 3;
     int base = row * 3;
@@ -72,6 +48,16 @@ char* find_xterm() {
     return NULL;
 }
 
+void print_help() {
+    printf("\nFoodoku Commands:\n");
+    printf("h - Show this help message\n");
+    printf("n - Start new game\n");
+    printf("p b c d - Place digit d in cell c of block b\n");
+    printf("s - Show solution\n");
+    printf("q - Quit game\n\n");
+    printf("Blocks and cells are numbered 0-8 in row-major order\n");
+}
+
 void launch_block(int block_num, PipePair *pipes, int *neighbor_write_fds) {
     char block_str[4], read_fd[8], write_fd[8];
     char n1_fd[8], n2_fd[8], n3_fd[8], n4_fd[8];
@@ -91,9 +77,9 @@ void launch_block(int block_num, PipePair *pipes, int *neighbor_write_fds) {
     
     char title[20];
     sprintf(title, "Block %d", block_num);
-
+    
     char* xterm_path = find_xterm();
-    if (xterm_path == NULL) {
+    if (!xterm_path) {
         fprintf(stderr, "Could not find xterm executable\n");
         exit(1);
     }
@@ -114,16 +100,6 @@ void launch_block(int block_num, PipePair *pipes, int *neighbor_write_fds) {
     exit(1);
 }
 
-void print_help() {
-    printf("\nFoodoku Commands:\n");
-    printf("h - Show this help message\n");
-    printf("n - Start new game\n");
-    printf("p b c d - Place digit d in cell c of block b\n");
-    printf("s - Show solution\n");
-    printf("q - Quit game\n\n");
-    printf("Blocks and cells are numbered 0-8 in row-major order\n");
-}
-
 int main() {
     PipePair pipes[BLOCK_COUNT];
     pid_t child_pids[BLOCK_COUNT];
@@ -131,7 +107,6 @@ int main() {
     int S[BOARD_SIZE][BOARD_SIZE];
     char command;
     
-    // Save original stdout
     original_stdout = dup(STDOUT_FILENO);
     
     // Create pipes
@@ -194,16 +169,19 @@ int main() {
             case 'n': {
                 newboard(A, S);
                 for (int block = 0; block < BLOCK_COUNT; block++) {
-                    write_to_pipe(pipes[block].write_fd, "n ");
+                    int stdout_backup = dup(STDOUT_FILENO);
+                    dup2(pipes[block].write_fd, STDOUT_FILENO);
+                    printf("n ");
                     int row_start = (block / 3) * 3;
                     int col_start = (block % 3) * 3;
                     for (int i = 0; i < 3; i++) {
                         for (int j = 0; j < 3; j++) {
-                            write_to_pipe(pipes[block].write_fd, "%d ", 
-                                    A[row_start + i][col_start + j]);
+                            printf("%d ", A[row_start + i][col_start + j]);
                         }
                     }
-                    write_to_pipe(pipes[block].write_fd, "\n");
+                    printf("\n");
+                    fflush(stdout);
+                    dup2(stdout_backup, STDOUT_FILENO);
                 }
                 break;
             }
@@ -216,45 +194,52 @@ int main() {
                     printf("Invalid input values\n");
                     continue;
                 }
-                write_to_pipe(pipes[block].write_fd, "p %d %d\n", cell, digit);
+                int stdout_backup = dup(STDOUT_FILENO);
+                dup2(pipes[block].write_fd, STDOUT_FILENO);
+                printf("p %d %d\n", cell, digit);
+                fflush(stdout);
+                dup2(stdout_backup, STDOUT_FILENO);
                 break;
             }
                 
             case 's': {
                 for (int block = 0; block < BLOCK_COUNT; block++) {
-                    write_to_pipe(pipes[block].write_fd, "s ");
+                    int stdout_backup = dup(STDOUT_FILENO);
+                    dup2(pipes[block].write_fd, STDOUT_FILENO);
+                    printf("s ");
                     int row_start = (block / 3) * 3;
                     int col_start = (block % 3) * 3;
                     for (int i = 0; i < 3; i++) {
                         for (int j = 0; j < 3; j++) {
-                            write_to_pipe(pipes[block].write_fd, "%d ", 
-                                    A[row_start + i][col_start + j]);
+                            printf("%d ", A[row_start + i][col_start + j]);
                         }
                     }
                     for (int i = 0; i < 3; i++) {
                         for (int j = 0; j < 3; j++) {
-                            write_to_pipe(pipes[block].write_fd, "%d ", 
-                                    S[row_start + i][col_start + j]);
+                            printf("%d ", S[row_start + i][col_start + j]);
                         }
                     }
-                    write_to_pipe(pipes[block].write_fd, "\n");
+                    printf("\n");
+                    fflush(stdout);
+                    dup2(stdout_backup, STDOUT_FILENO);
                 }
                 break;
             }
                 
             case 'q':
                 for (int i = 0; i < BLOCK_COUNT; i++) {
-                    write_to_pipe(pipes[i].write_fd, "q\n");
+                    int stdout_backup = dup(STDOUT_FILENO);
+                    dup2(pipes[i].write_fd, STDOUT_FILENO);
+                    printf("q\n");
+                    fflush(stdout);
+                    dup2(stdout_backup, STDOUT_FILENO);
                 }
                 
                 for (int i = 0; i < BLOCK_COUNT; i++) {
                     waitpid(child_pids[i], NULL, 0);
                 }
                 
-                // Restore original stdout before exiting
                 dup2(original_stdout, STDOUT_FILENO);
-                close(original_stdout);
-                
                 printf("Game over. Goodbye!\n");
                 exit(0);
                 break;

@@ -3,33 +3,11 @@
 #include <unistd.h>
 #include <string.h>
 #include <time.h>
-#include <stdarg.h>
 
 #define BLOCK_SIZE 3
 
-// original stdout for block display
+// Store original stdout for block display
 static int original_stdout;
-
-void write_to_pipe(int fd, const char *format, ...) {
-    va_list args;
-    int saved_stdout;
-    
-    // Save current stdout
-    saved_stdout = dup(STDOUT_FILENO);
-    
-    // Redirect stdout to pipe
-    dup2(fd, STDOUT_FILENO);
-    
-    // Write to pipe using printf
-    va_start(args, format);
-    vprintf(format, args);
-    va_end(args);
-    fflush(stdout);
-    
-    // Restore original stdout
-    dup2(saved_stdout, STDOUT_FILENO);
-    close(saved_stdout);
-}
 
 void draw_block(int block_num, int board[BLOCK_SIZE][BLOCK_SIZE], int original[BLOCK_SIZE][BLOCK_SIZE]) {
     dup2(original_stdout, STDOUT_FILENO);
@@ -60,7 +38,6 @@ void draw_block(int block_num, int board[BLOCK_SIZE][BLOCK_SIZE], int original[B
 }
 
 void draw_solution(int block_num, int original[BLOCK_SIZE][BLOCK_SIZE], int solution[BLOCK_SIZE][BLOCK_SIZE]) {
-
     dup2(original_stdout, STDOUT_FILENO);
     
     printf("\033[H\033[J");
@@ -88,7 +65,6 @@ void draw_solution(int block_num, int original[BLOCK_SIZE][BLOCK_SIZE], int solu
 
 void show_error(const char *message, int block_num, int board[BLOCK_SIZE][BLOCK_SIZE], int original[BLOCK_SIZE][BLOCK_SIZE]) {
     dup2(original_stdout, STDOUT_FILENO);
-    
     printf("%s\n", message);
     fflush(stdout);
     sleep(2);
@@ -97,8 +73,7 @@ void show_error(const char *message, int block_num, int board[BLOCK_SIZE][BLOCK_
 
 int main(int argc, char *argv[]) {
     if (argc != 8) {
-        fprintf(stderr, "Usage: %s block_num read_fd write_fd "
-                "row_n1_fd row_n2_fd col_n1_fd col_n2_fd\n", argv[0]);
+        fprintf(stderr, "Usage: %s block_num read_fd write_fd row_n1_fd row_n2_fd col_n1_fd col_n2_fd\n", argv[0]);
         exit(1);
     }
     
@@ -114,24 +89,16 @@ int main(int argc, char *argv[]) {
     int original[BLOCK_SIZE][BLOCK_SIZE] = {{0}};
     int current[BLOCK_SIZE][BLOCK_SIZE] = {{0}};
     
-    // Save original stdout before any redirection
+    // Save original stdout
     original_stdout = dup(STDOUT_FILENO);
     
-    printf("Block %d ready\n", block_num);
-    fflush(stdout);
-    
     // Redirect stdin to read from pipe
-    if (dup2(read_fd, STDIN_FILENO) == -1) {
-        perror("dup2 failed");
-        exit(1);
-    }
-    close(read_fd);
+    dup2(read_fd, STDIN_FILENO);
     
     char command;
     while (scanf(" %c", &command) != EOF) {
         switch (command) {
             case 'n': {
-                // Read new board state
                 for (int i = 0; i < BLOCK_SIZE; i++) {
                     for (int j = 0; j < BLOCK_SIZE; j++) {
                         scanf("%d", &original[i][j]);
@@ -168,8 +135,17 @@ int main(int argc, char *argv[]) {
                 }
                 
                 // Check row conflicts
-                write_to_pipe(row_n1_fd, "r %d %d %d\n", row, digit, write_fd);
-                write_to_pipe(row_n2_fd, "r %d %d %d\n", row, digit, write_fd);
+                int stdout_backup = dup(STDOUT_FILENO);
+                
+                dup2(row_n1_fd, STDOUT_FILENO);
+                printf("r %d %d %d\n", row, digit, write_fd);
+                fflush(stdout);
+                
+                dup2(row_n2_fd, STDOUT_FILENO);
+                printf("r %d %d %d\n", row, digit, write_fd);
+                fflush(stdout);
+                
+                dup2(stdout_backup, STDOUT_FILENO);
                 
                 int response;
                 scanf("%d", &response);
@@ -184,8 +160,15 @@ int main(int argc, char *argv[]) {
                 }
                 
                 // Check column conflicts
-                write_to_pipe(col_n1_fd, "c %d %d %d\n", col, digit, write_fd);
-                write_to_pipe(col_n2_fd, "c %d %d %d\n", col, digit, write_fd);
+                dup2(col_n1_fd, STDOUT_FILENO);
+                printf("c %d %d %d\n", col, digit, write_fd);
+                fflush(stdout);
+                
+                dup2(col_n2_fd, STDOUT_FILENO);
+                printf("c %d %d %d\n", col, digit, write_fd);
+                fflush(stdout);
+                
+                dup2(stdout_backup, STDOUT_FILENO);
                 
                 scanf("%d", &response);
                 if (response != 0) {
@@ -213,7 +196,11 @@ int main(int argc, char *argv[]) {
                         break;
                     }
                 }
-                write_to_pipe(resp_fd, "%d\n", has_conflict);
+                int stdout_backup = dup(STDOUT_FILENO);
+                dup2(resp_fd, STDOUT_FILENO);
+                printf("%d\n", has_conflict);
+                fflush(stdout);
+                dup2(stdout_backup, STDOUT_FILENO);
                 break;
             }
                 
@@ -227,7 +214,11 @@ int main(int argc, char *argv[]) {
                         break;
                     }
                 }
-                write_to_pipe(resp_fd, "%d\n", has_conflict);
+                int stdout_backup = dup(STDOUT_FILENO);
+                dup2(resp_fd, STDOUT_FILENO);
+                printf("%d\n", has_conflict);
+                fflush(stdout);
+                dup2(stdout_backup, STDOUT_FILENO);
                 break;
             }
                 
@@ -235,27 +226,18 @@ int main(int argc, char *argv[]) {
                 dup2(original_stdout, STDOUT_FILENO);
                 printf("\nBye from B%d...\n", block_num);
                 fflush(stdout);
-                sleep(2);
-                
-                close(write_fd);
-                close(row_n1_fd);
-                close(row_n2_fd);
-                close(col_n1_fd);
-                close(col_n2_fd);
-                close(original_stdout);
+                sleep(1);
                 exit(0);
                 break;
             }
                 
             case 's': {
                 int solution[BLOCK_SIZE][BLOCK_SIZE] = {{0}};
-                // Read original board
                 for (int i = 0; i < BLOCK_SIZE; i++) {
                     for (int j = 0; j < BLOCK_SIZE; j++) {
                         scanf("%d", &original[i][j]);
                     }
                 }
-                // Read solution board
                 for (int i = 0; i < BLOCK_SIZE; i++) {
                     for (int j = 0; j < BLOCK_SIZE; j++) {
                         scanf("%d", &solution[i][j]);
