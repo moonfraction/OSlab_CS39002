@@ -5,18 +5,42 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include "boardgen.c"
+#include <stdarg.h>
 
 #define BLOCK_COUNT 9
 #define BLOCK_SIZE 3
 #define BOARD_SIZE 9
 
-// to store pipe information for each block
 typedef struct {
     int read_fd;
     int write_fd;
 } PipePair;
 
-// get row neighbors for a block
+// original stdout for later use
+static int original_stdout;
+
+void write_to_pipe(int fd, const char *format, ...) {
+    va_list args;
+    int saved_stdout;
+    
+    // Save current stdout
+    saved_stdout = dup(STDOUT_FILENO);
+    
+    // Redirect stdout to pipe
+    dup2(fd, STDOUT_FILENO);
+    
+    // Write to pipe using printf
+    va_start(args, format);
+    vprintf(format, args);
+    va_end(args);
+    fflush(stdout);
+    
+    // Restore original stdout
+    dup2(saved_stdout, STDOUT_FILENO);
+    close(saved_stdout);
+}
+
+// Rest of the helper functions remain the same
 void get_row_neighbors(int block, int *n1, int *n2) {
     int row = block / 3;
     int base = row * 3;
@@ -24,7 +48,6 @@ void get_row_neighbors(int block, int *n1, int *n2) {
     *n2 = (block + 2) % 3 + base;
 }
 
-// get column neighbors for a block
 void get_column_neighbors(int block, int *n1, int *n2) {
     int col = block % 3;
     *n1 = (block + 3) % 9;
@@ -33,14 +56,12 @@ void get_column_neighbors(int block, int *n1, int *n2) {
     if (*n2 % 3 != col) *n2 = (*n2 / 3) * 3 + col;
 }
 
-// finding the xterm executable
 char* find_xterm() {
-    // Common paths for xterm
     const char* paths[] = {
         "/usr/bin/xterm",
         "/bin/xterm",
         "/usr/local/bin/xterm",
-        "xterm"  // Will use PATH environment
+        "xterm"
     };
     
     for (int i = 0; i < sizeof(paths)/sizeof(paths[0]); i++) {
@@ -51,18 +72,15 @@ char* find_xterm() {
     return NULL;
 }
 
-// launch xterm for a block
 void launch_block(int block_num, PipePair *pipes, int *neighbor_write_fds) {
     char block_str[4], read_fd[8], write_fd[8];
     char n1_fd[8], n2_fd[8], n3_fd[8], n4_fd[8];
     
-    // Calc window position
-    char geometry[32];
     int x = (block_num % 3) * 210 + 700;
     int y = (block_num / 3) * 220 + 100;
+    char geometry[32];
     sprintf(geometry, "17x8+%d+%d", x, y);
     
-    // Conv numbers to strings
     sprintf(block_str, "%d", block_num);
     sprintf(read_fd, "%d", pipes[block_num].read_fd);
     sprintf(write_fd, "%d", pipes[block_num].write_fd);
@@ -96,7 +114,6 @@ void launch_block(int block_num, PipePair *pipes, int *neighbor_write_fds) {
     exit(1);
 }
 
-// Function to print help message
 void print_help() {
     printf("\nFoodoku Commands:\n");
     printf("h - Show this help message\n");
@@ -108,34 +125,35 @@ void print_help() {
 }
 
 int main() {
-    PipePair pipes[BLOCK_COUNT]; // store pipe information
-    pid_t child_pids[BLOCK_COUNT]; // store child pids
-    int A[BOARD_SIZE][BOARD_SIZE]; // Original board
-    int S[BOARD_SIZE][BOARD_SIZE]; // Solution board
+    PipePair pipes[BLOCK_COUNT];
+    pid_t child_pids[BLOCK_COUNT];
+    int A[BOARD_SIZE][BOARD_SIZE];
+    int S[BOARD_SIZE][BOARD_SIZE];
     char command;
     
-    // Create pipes for each block
+    // Save original stdout
+    original_stdout = dup(STDOUT_FILENO);
+    
+    // Create pipes
     for (int i = 0; i < BLOCK_COUNT; i++) {
         int pipefd[2];
         if (pipe(pipefd) == -1) {
             perror("pipe creation failed");
             exit(1);
         }
-        pipes[i].read_fd = pipefd[0]; // Read end
-        pipes[i].write_fd = pipefd[1]; // Write end
+        pipes[i].read_fd = pipefd[0];
+        pipes[i].write_fd = pipefd[1];
     }
     
-    // Fork children for each block
+    // Fork children
     for (int block = 0; block < BLOCK_COUNT; block++) {
         pid_t pid = fork();
         
-        if (pid == 0) {  // Child
-            // Get neighbor blocks
+        if (pid == 0) {
             int row_n1, row_n2, col_n1, col_n2;
             get_row_neighbors(block, &row_n1, &row_n2);
             get_column_neighbors(block, &col_n1, &col_n2);
             
-            // Prepare neighbor write FDs for the blockto send messages to neighbors
             int neighbor_write_fds[4] = {
                 pipes[row_n1].write_fd,
                 pipes[row_n2].write_fd,
@@ -155,7 +173,7 @@ int main() {
             }
             
             launch_block(block, pipes, neighbor_write_fds);
-        } else if (pid > 0) {  // Parent process
+        } else if (pid > 0) {
             child_pids[block] = pid;
         } else {
             perror("fork failed");
@@ -163,7 +181,6 @@ int main() {
         }
     }
     
-    // Main game loop
     print_help();
     while (1) {
         printf("\nEnter command: ");
@@ -176,20 +193,17 @@ int main() {
                 
             case 'n': {
                 newboard(A, S);
-                // Send initial board state to each block
                 for (int block = 0; block < BLOCK_COUNT; block++) {
-                    // man dprintf
-                    // dprintf() and vdprintf() write output to the given file descriptor
-                    dprintf(pipes[block].write_fd, "n ");
+                    write_to_pipe(pipes[block].write_fd, "n ");
                     int row_start = (block / 3) * 3;
                     int col_start = (block % 3) * 3;
                     for (int i = 0; i < 3; i++) {
                         for (int j = 0; j < 3; j++) {
-                            dprintf(pipes[block].write_fd, "%d ", 
+                            write_to_pipe(pipes[block].write_fd, "%d ", 
                                     A[row_start + i][col_start + j]);
                         }
                     }
-                    dprintf(pipes[block].write_fd, "\n");
+                    write_to_pipe(pipes[block].write_fd, "\n");
                 }
                 break;
             }
@@ -202,45 +216,44 @@ int main() {
                     printf("Invalid input values\n");
                     continue;
                 }
-                dprintf(pipes[block].write_fd, "p %d %d\n", cell, digit);
+                write_to_pipe(pipes[block].write_fd, "p %d %d\n", cell, digit);
                 break;
             }
                 
             case 's': {
-                // Send both original and solution boards
                 for (int block = 0; block < BLOCK_COUNT; block++) {
-                    dprintf(pipes[block].write_fd, "s ");
+                    write_to_pipe(pipes[block].write_fd, "s ");
                     int row_start = (block / 3) * 3;
                     int col_start = (block % 3) * 3;
-                    // Send original board first
                     for (int i = 0; i < 3; i++) {
                         for (int j = 0; j < 3; j++) {
-                            dprintf(pipes[block].write_fd, "%d ", 
+                            write_to_pipe(pipes[block].write_fd, "%d ", 
                                     A[row_start + i][col_start + j]);
                         }
                     }
-                    // Send solution board
                     for (int i = 0; i < 3; i++) {
                         for (int j = 0; j < 3; j++) {
-                            dprintf(pipes[block].write_fd, "%d ", 
+                            write_to_pipe(pipes[block].write_fd, "%d ", 
                                     S[row_start + i][col_start + j]);
                         }
                     }
-                    dprintf(pipes[block].write_fd, "\n");
+                    write_to_pipe(pipes[block].write_fd, "\n");
                 }
                 break;
             }
                 
             case 'q':
-                // Send quit command to all blocks
                 for (int i = 0; i < BLOCK_COUNT; i++) {
-                    dprintf(pipes[i].write_fd, "q\n");
+                    write_to_pipe(pipes[i].write_fd, "q\n");
                 }
                 
-                // Wait for all children to exit
                 for (int i = 0; i < BLOCK_COUNT; i++) {
                     waitpid(child_pids[i], NULL, 0);
                 }
+                
+                // Restore original stdout before exiting
+                dup2(original_stdout, STDOUT_FILENO);
+                close(original_stdout);
                 
                 printf("Game over. Goodbye!\n");
                 exit(0);

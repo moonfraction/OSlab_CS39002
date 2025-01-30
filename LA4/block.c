@@ -3,12 +3,38 @@
 #include <unistd.h>
 #include <string.h>
 #include <time.h>
+#include <stdarg.h>
 
 #define BLOCK_SIZE 3
 
-// Function to draw the 3x3 block
+// original stdout for block display
+static int original_stdout;
+
+void write_to_pipe(int fd, const char *format, ...) {
+    va_list args;
+    int saved_stdout;
+    
+    // Save current stdout
+    saved_stdout = dup(STDOUT_FILENO);
+    
+    // Redirect stdout to pipe
+    dup2(fd, STDOUT_FILENO);
+    
+    // Write to pipe using printf
+    va_start(args, format);
+    vprintf(format, args);
+    va_end(args);
+    fflush(stdout);
+    
+    // Restore original stdout
+    dup2(saved_stdout, STDOUT_FILENO);
+    close(saved_stdout);
+}
+
 void draw_block(int block_num, int board[BLOCK_SIZE][BLOCK_SIZE], int original[BLOCK_SIZE][BLOCK_SIZE]) {
-    printf("\033[H\033[J");  // Clear screen
+    dup2(original_stdout, STDOUT_FILENO);
+    
+    printf("\033[H\033[J");
     printf("Block %d:\n", block_num);
     printf("+---+---+---+\n");
     for (int i = 0; i < BLOCK_SIZE; i++) {
@@ -18,10 +44,8 @@ void draw_block(int block_num, int board[BLOCK_SIZE][BLOCK_SIZE], int original[B
                 printf(" . ");
             } else {
                 if (original[i][j] != 0) {
-                    // Red color for original numbers
                     printf(" \033[31m%d\033[0m ", board[i][j]);
                 } else {
-                    // Default color for player-placed numbers
                     printf(" \033[34m%d\033[0m ", board[i][j]);
                 }
             }
@@ -36,17 +60,18 @@ void draw_block(int block_num, int board[BLOCK_SIZE][BLOCK_SIZE], int original[B
 }
 
 void draw_solution(int block_num, int original[BLOCK_SIZE][BLOCK_SIZE], int solution[BLOCK_SIZE][BLOCK_SIZE]) {
-    printf("\033[H\033[J");  // Clear screen
+
+    dup2(original_stdout, STDOUT_FILENO);
+    
+    printf("\033[H\033[J");
     printf("Block %d (Solution):\n", block_num);
     printf("+---+---+---+\n");
     for (int i = 0; i < BLOCK_SIZE; i++) {
         printf("|");
         for (int j = 0; j < BLOCK_SIZE; j++) {
             if (original[i][j] != 0) {
-                // Red for original numbers
                 printf(" \033[31m%d\033[0m ", original[i][j]);
             } else if (solution[i][j] != 0) {
-                // Green for solution numbers
                 printf(" \033[32m%d\033[0m ", solution[i][j]);
             } else {
                 printf(" . ");
@@ -61,8 +86,9 @@ void draw_solution(int block_num, int original[BLOCK_SIZE][BLOCK_SIZE], int solu
     fflush(stdout);
 }
 
-// Function to print error message and redraw after delay
 void show_error(const char *message, int block_num, int board[BLOCK_SIZE][BLOCK_SIZE], int original[BLOCK_SIZE][BLOCK_SIZE]) {
+    dup2(original_stdout, STDOUT_FILENO);
+    
     printf("%s\n", message);
     fflush(stdout);
     sleep(2);
@@ -76,7 +102,6 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
     
-    // getting the block number and file descriptors
     int block_num = atoi(argv[1]);
     int read_fd = atoi(argv[2]);
     int write_fd = atoi(argv[3]);
@@ -88,17 +113,15 @@ int main(int argc, char *argv[]) {
     // Arrays to store original puzzle and current state
     int original[BLOCK_SIZE][BLOCK_SIZE] = {{0}};
     int current[BLOCK_SIZE][BLOCK_SIZE] = {{0}};
-
-    // print block ready message
+    
+    // Save original stdout before any redirection
+    original_stdout = dup(STDOUT_FILENO);
+    
     printf("Block %d ready\n", block_num);
-
-    // man dup2
-    // In dup2(), the value of the new descriptor fildes2 is specified.  If fildes and fildes2 are
-    //  equal, then dup2() just returns fildes2; no other changes are made to the existing
-    //  descriptor.  Otherwise, if descriptor fildes2 is already in use, it is first deallocated as
-    //  if a close(2) call had been done first.
-
-    if (dup2(read_fd, STDIN_FILENO) == -1) { // redirecting the read_fd to stdin
+    fflush(stdout);
+    
+    // Redirect stdin to read from pipe
+    if (dup2(read_fd, STDIN_FILENO) == -1) {
         perror("dup2 failed");
         exit(1);
     }
@@ -125,13 +148,11 @@ int main(int argc, char *argv[]) {
                 int row = cell / 3;
                 int col = cell % 3;
                 
-                // Check if cell is in original puzzle
                 if (original[row][col] != 0) {
                     show_error("Read-only cell", block_num, current, original);
                     continue;
                 }
                 
-                // Check for block conflicts
                 int has_conflict = 0;
                 for (int i = 0; i < BLOCK_SIZE && !has_conflict; i++) {
                     for (int j = 0; j < BLOCK_SIZE; j++) {
@@ -147,8 +168,9 @@ int main(int argc, char *argv[]) {
                 }
                 
                 // Check row conflicts
-                dprintf(row_n1_fd, "r %d %d %d\n", row, digit, write_fd);
-                dprintf(row_n2_fd, "r %d %d %d\n", row, digit, write_fd);
+                write_to_pipe(row_n1_fd, "r %d %d %d\n", row, digit, write_fd);
+                write_to_pipe(row_n2_fd, "r %d %d %d\n", row, digit, write_fd);
+                
                 int response;
                 scanf("%d", &response);
                 if (response != 0) {
@@ -162,20 +184,20 @@ int main(int argc, char *argv[]) {
                 }
                 
                 // Check column conflicts
-                dprintf(col_n1_fd, "c %d %d %d\n", col, digit, write_fd);
-                dprintf(col_n2_fd, "c %d %d %d\n", col, digit, write_fd);
+                write_to_pipe(col_n1_fd, "c %d %d %d\n", col, digit, write_fd);
+                write_to_pipe(col_n2_fd, "c %d %d %d\n", col, digit, write_fd);
+                
                 scanf("%d", &response);
                 if (response != 0) {
-                    show_error("Column conflict", block_num, current, original);;
+                    show_error("Column conflict", block_num, current, original);
                     continue;
                 }
                 scanf("%d", &response);
                 if (response != 0) {
-                    show_error("Column conflict", block_num, current, original);;
+                    show_error("Column conflict", block_num, current, original);
                     continue;
                 }
                 
-                // If no conflicts, update the cell
                 current[row][col] = digit;
                 draw_block(block_num, current, original);
                 break;
@@ -191,7 +213,7 @@ int main(int argc, char *argv[]) {
                         break;
                     }
                 }
-                dprintf(resp_fd, "%d\n", has_conflict);
+                write_to_pipe(resp_fd, "%d\n", has_conflict);
                 break;
             }
                 
@@ -205,20 +227,22 @@ int main(int argc, char *argv[]) {
                         break;
                     }
                 }
-                dprintf(resp_fd, "%d\n", has_conflict);
+                write_to_pipe(resp_fd, "%d\n", has_conflict);
                 break;
             }
                 
             case 'q': {
+                dup2(original_stdout, STDOUT_FILENO);
                 printf("\nBye from B%d...\n", block_num);
                 fflush(stdout);
                 sleep(2);
-                // Close all pipe file descriptors
+                
                 close(write_fd);
                 close(row_n1_fd);
                 close(row_n2_fd);
                 close(col_n1_fd);
                 close(col_n2_fd);
+                close(original_stdout);
                 exit(0);
                 break;
             }
