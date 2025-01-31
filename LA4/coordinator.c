@@ -5,34 +5,57 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include "boardgen.c"
+// #include <time.h>  // included in boardgen.c
 
-#define BLOCK_COUNT 9
-#define BLOCK_SIZE 3
-#define BOARD_SIZE 9
+#define N 9
+#define DIM 3
+#define WIN_X 700
+#define WIN_Y 100
+#define X_STEP 210
+#define Y_STEP 220
+#define BUF_SZ 32
+
+#define IS_VALID(r, c, v) \
+    ((r) >= 0 && (r) < N && \
+     (c) >= 0 && (c) < N && \
+     (v) >= 1 && (v) <= N)
 
 typedef struct {
-    int read_fd;
-    int write_fd;
-} PipePair;
+    int in;
+    int out;
+} Pipe;
 
-static int original_stdout;
+static int main_out;
 
-void get_row_neighbors(int block, int *n1, int *n2) {
-    int row = block / 3;
-    int base = row * 3;
-    *n1 = (block + 1) % 3 + base;
-    *n2 = (block + 2) % 3 + base;
+int check_fd(int fd) {
+    return fd != -1;
 }
 
-void get_column_neighbors(int block, int *n1, int *n2) {
-    int col = block % 3;
-    *n1 = (block + 3) % 9;
-    *n2 = (block + 6) % 9;
-    if (*n1 % 3 != col) *n1 = (*n1 / 3) * 3 + col;
-    if (*n2 % 3 != col) *n2 = (*n2 / 3) * 3 + col;
+void get_pos(int idx, int* x, int* y) {
+    *x = (idx % DIM) * X_STEP + WIN_X;
+    *y = (idx / DIM) * Y_STEP + WIN_Y;
 }
 
-char* find_xterm() {
+void get_row_adj(int idx, int* a1, int* a2) {
+    int base = (idx / DIM) * DIM;
+    *a1 = (idx + 1) % DIM + base;
+    *a2 = (idx + 2) % DIM + base;
+}
+
+void get_col_adj(int idx, int* a1, int* a2) {
+    int col = idx % DIM;
+    *a1 = (idx + DIM) % N;
+    *a2 = (idx + 2 * DIM) % N;
+    
+    if (*a1 % DIM != col) {
+        *a1 = (*a1 / DIM) * DIM + col;
+    }
+    if (*a2 % DIM != col) {
+        *a2 = (*a2 / DIM) * DIM + col;
+    }
+}
+
+char* find_term() {
     const char* paths[] = {
         "/usr/bin/xterm",
         "/bin/xterm",
@@ -40,8 +63,9 @@ char* find_xterm() {
         "xterm"
     };
     
-    for (int i = 0; i < sizeof(paths)/sizeof(paths[0]); i++) {
-        if (access(paths[i], X_OK) == 0 || strcmp(paths[i], "xterm") == 0) {
+    for (int i = 0; i < 4; i++) {
+        if (access(paths[i], X_OK) == 0 || 
+            strcmp(paths[i], "xterm") == 0) {
             return strdup(paths[i]);
         }
     }
@@ -49,107 +73,108 @@ char* find_xterm() {
 }
 
 void print_help() {
-    printf("\nFoodoku Commands:\n");
-    printf("h - Show this help message\n");
-    printf("n - Start new game\n");
-    printf("p b c d - Place digit d in cell c of block b\n");
+    printf("\nCommands:\n");
+    printf("h - Help\n");
+    printf("n - New game\n");
+    printf("p r c v - Put value v in cell c of region r\n");
     printf("s - Show solution\n");
-    printf("q - Quit game\n\n");
-    printf("Blocks and cells are numbered 0-8 in row-major order\n");
+    printf("q - Quit\n\n");
+    printf("Regions/cells: 0-8 row by row\n");
 }
 
-void launch_block(int block_num, PipePair *pipes, int *neighbor_write_fds) {
-    char block_str[4], read_fd[8], write_fd[8];
-    char n1_fd[8], n2_fd[8], n3_fd[8], n4_fd[8];
+void init_proc(int idx, Pipe* pipes, int* adj_out) {
+    char id[4], in[8], out[8];
+    char adj[4][8];
     
-    int x = (block_num % 3) * 210 + 700;
-    int y = (block_num / 3) * 220 + 100;
-    char geometry[32];
-    sprintf(geometry, "17x8+%d+%d", x, y);
+    int x, y;
+    get_pos(idx, &x, &y);
     
-    sprintf(block_str, "%d", block_num);
-    sprintf(read_fd, "%d", pipes[block_num].read_fd);
-    sprintf(write_fd, "%d", pipes[block_num].write_fd);
-    sprintf(n1_fd, "%d", neighbor_write_fds[0]);
-    sprintf(n2_fd, "%d", neighbor_write_fds[1]);
-    sprintf(n3_fd, "%d", neighbor_write_fds[2]);
-    sprintf(n4_fd, "%d", neighbor_write_fds[3]);
+    char geo[BUF_SZ];
+    sprintf(geo, "17x8+%d+%d", x, y);
     
-    char title[20];
-    sprintf(title, "Block %d", block_num);
+    sprintf(id, "%d", idx);
+    sprintf(in, "%d", pipes[idx].in);
+    sprintf(out, "%d", pipes[idx].out);
     
-    char* xterm_path = find_xterm();
-    if (!xterm_path) {
-        fprintf(stderr, "Could not find xterm executable\n");
+    for (int i = 0; i < 4; i++) {
+        sprintf(adj[i], "%d", adj_out[i]);
+    }
+    
+    char title[BUF_SZ];
+    sprintf(title, "Region %d", idx);
+    
+    char* term = find_term();
+    if (!term) {
+        fprintf(stderr, "xterm not found\n");
         exit(1);
     }
     
-    execl(xterm_path, "xterm",
+    execl(term, "xterm",
           "-T", title,
           "-fa", "Monospace",
           "-fs", "15",
-          "-geometry", geometry,
+          "-geometry", geo,
           "-bg", "white",
           "-e", "./block",
-          block_str, read_fd, write_fd,
-          n1_fd, n2_fd, n3_fd, n4_fd,
+          id, in, out,
+          adj[0], adj[1], adj[2], adj[3],
           NULL);
     
-    free(xterm_path);
-    perror("execl failed");
+    free(term);
+    perror("exec failed");
     exit(1);
 }
 
 int main() {
-    PipePair pipes[BLOCK_COUNT];
-    pid_t child_pids[BLOCK_COUNT];
-    int A[BOARD_SIZE][BOARD_SIZE];
-    int S[BOARD_SIZE][BOARD_SIZE];
-    char command;
+    Pipe pipes[N];
+    pid_t pids[N];
+    int grid[N][N];
+    int soln[N][N];
+    char cmd;
     
-    original_stdout = dup(STDOUT_FILENO);
+    main_out = dup(STDOUT_FILENO);
     
     // Create pipes
-    for (int i = 0; i < BLOCK_COUNT; i++) {
-        int pipefd[2];
-        if (pipe(pipefd) == -1) {
-            perror("pipe creation failed");
+    for (int i = 0; i < N; i++) {
+        int p[2];
+        if (pipe(p) == -1) {
+            perror("pipe failed");
             exit(1);
         }
-        pipes[i].read_fd = pipefd[0];
-        pipes[i].write_fd = pipefd[1];
+        pipes[i].in = p[0];
+        pipes[i].out = p[1];
     }
     
-    // Fork children
-    for (int block = 0; block < BLOCK_COUNT; block++) {
+    // Fork processes
+    for (int idx = 0; idx < N; idx++) {
         pid_t pid = fork();
         
         if (pid == 0) {
-            int row_n1, row_n2, col_n1, col_n2;
-            get_row_neighbors(block, &row_n1, &row_n2);
-            get_column_neighbors(block, &col_n1, &col_n2);
+            int h1, h2, v1, v2;
+            get_row_adj(idx, &h1, &h2);
+            get_col_adj(idx, &v1, &v2);
             
-            int neighbor_write_fds[4] = {
-                pipes[row_n1].write_fd,
-                pipes[row_n2].write_fd,
-                pipes[col_n1].write_fd,
-                pipes[col_n2].write_fd
+            int adj[4] = {
+                pipes[h1].out,
+                pipes[h2].out,
+                pipes[v1].out,
+                pipes[v2].out
             };
             
-            // Close unused pipe ends
-            for (int i = 0; i < BLOCK_COUNT; i++) {
-                if (i != block) {
-                    close(pipes[i].read_fd);
+            // Close unused pipes
+            for (int i = 0; i < N; i++) {
+                if (i != idx) {
+                    close(pipes[i].in);
                 }
-                if (!((i == row_n1) || (i == row_n2) || 
-                      (i == col_n1) || (i == col_n2) || (i == block))) {
-                    close(pipes[i].write_fd);
+                if (!((i == h1) || (i == h2) || 
+                      (i == v1) || (i == v2) || (i == idx))) {
+                    close(pipes[i].out);
                 }
             }
             
-            launch_block(block, pipes, neighbor_write_fds);
+            init_proc(idx, pipes, adj);
         } else if (pid > 0) {
-            child_pids[block] = pid;
+            pids[idx] = pid;
         } else {
             perror("fork failed");
             exit(1);
@@ -159,94 +184,93 @@ int main() {
     print_help();
     while (1) {
         printf("\nEnter command: ");
-        scanf(" %c", &command);
+        scanf(" %c", &cmd);
         
-        switch (command) {
-            case 'h':
-                print_help();
-                break;
-                
-            case 'n': {
-                newboard(A, S);
-                for (int block = 0; block < BLOCK_COUNT; block++) {
-                    int stdout_backup = dup(STDOUT_FILENO);
-                    dup2(pipes[block].write_fd, STDOUT_FILENO);
-                    printf("n ");
-                    int row_start = (block / 3) * 3;
-                    int col_start = (block % 3) * 3;
-                    for (int i = 0; i < 3; i++) {
-                        for (int j = 0; j < 3; j++) {
-                            printf("%d ", A[row_start + i][col_start + j]);
-                        }
-                    }
-                    printf("\n");
-                    fflush(stdout);
-                    dup2(stdout_backup, STDOUT_FILENO);
-                }
-                break;
-            }
-                
-            case 'p': {
-                int block, cell, digit;
-                scanf("%d %d %d", &block, &cell, &digit);
-                if (block < 0 || block >= 9 || cell < 0 || cell >= 9 || 
-                    digit < 1 || digit > 9) {
-                    printf("Invalid input values\n");
-                    continue;
-                }
-                int stdout_backup = dup(STDOUT_FILENO);
-                dup2(pipes[block].write_fd, STDOUT_FILENO);
-                printf("p %d %d\n", cell, digit);
-                fflush(stdout);
-                dup2(stdout_backup, STDOUT_FILENO);
-                break;
-            }
-                
-            case 's': {
-                for (int block = 0; block < BLOCK_COUNT; block++) {
-                    int stdout_backup = dup(STDOUT_FILENO);
-                    dup2(pipes[block].write_fd, STDOUT_FILENO);
-                    printf("s ");
-                    int row_start = (block / 3) * 3;
-                    int col_start = (block % 3) * 3;
-                    for (int i = 0; i < 3; i++) {
-                        for (int j = 0; j < 3; j++) {
-                            printf("%d ", A[row_start + i][col_start + j]);
-                        }
-                    }
-                    for (int i = 0; i < 3; i++) {
-                        for (int j = 0; j < 3; j++) {
-                            printf("%d ", S[row_start + i][col_start + j]);
-                        }
-                    }
-                    printf("\n");
-                    fflush(stdout);
-                    dup2(stdout_backup, STDOUT_FILENO);
-                }
-                break;
-            }
-                
-            case 'q':
-                for (int i = 0; i < BLOCK_COUNT; i++) {
-                    int stdout_backup = dup(STDOUT_FILENO);
-                    dup2(pipes[i].write_fd, STDOUT_FILENO);
-                    printf("q\n");
-                    fflush(stdout);
-                    dup2(stdout_backup, STDOUT_FILENO);
-                }
-                
-                for (int i = 0; i < BLOCK_COUNT; i++) {
-                    waitpid(child_pids[i], NULL, 0);
-                }
-                
-                dup2(original_stdout, STDOUT_FILENO);
-                printf("Game over. Goodbye!\n");
-                exit(0);
-                break;
-                
-            default:
-                printf("Invalid command. Use 'h' for help.\n");
+        if (cmd == 'h') {
+            print_help();
+            continue;
         }
+        
+        if (cmd == 'n') {
+            newboard(grid, soln);
+            for (int idx = 0; idx < N; idx++) {
+                int old = dup(STDOUT_FILENO);
+                dup2(pipes[idx].out, STDOUT_FILENO);
+                printf("n ");
+                int r = (idx / DIM) * DIM;
+                int c = (idx % DIM) * DIM;
+                for (int i = 0; i < DIM; i++) {
+                    for (int j = 0; j < DIM; j++) {
+                        printf("%d ", grid[r + i][c + j]);
+                    }
+                }
+                printf("\n");
+                fflush(stdout);
+                dup2(old, STDOUT_FILENO);
+            }
+            continue;
+        }
+        
+        if (cmd == 'p') {
+            int r, c, v;
+            scanf("%d %d %d", &r, &c, &v);
+            if (!IS_VALID(r, c, v)) {
+                printf("Invalid input\n");
+                continue;
+            }
+            int old = dup(STDOUT_FILENO);
+            dup2(pipes[r].out, STDOUT_FILENO);
+            printf("p %d %d\n", c, v);
+            fflush(stdout);
+            dup2(old, STDOUT_FILENO);
+            continue;
+        }
+        
+        if (cmd == 's') {
+            for (int idx = 0; idx < N; idx++) {
+                int old = dup(STDOUT_FILENO);
+                dup2(pipes[idx].out, STDOUT_FILENO);
+                printf("s ");
+                int r = (idx / DIM) * DIM;
+                int c = (idx % DIM) * DIM;
+                
+                for (int i = 0; i < DIM; i++) {
+                    for (int j = 0; j < DIM; j++) {
+                        printf("%d ", grid[r + i][c + j]);
+                    }
+                }
+                
+                for (int i = 0; i < DIM; i++) {
+                    for (int j = 0; j < DIM; j++) {
+                        printf("%d ", soln[r + i][c + j]);
+                    }
+                }
+                printf("\n");
+                fflush(stdout);
+                dup2(old, STDOUT_FILENO);
+            }
+            continue;
+        }
+        
+        if (cmd == 'q') {
+            for (int i = 0; i < N; i++) {
+                int old = dup(STDOUT_FILENO);
+                dup2(pipes[i].out, STDOUT_FILENO);
+                printf("q\n");
+                fflush(stdout);
+                dup2(old, STDOUT_FILENO);
+            }
+            
+            for (int i = 0; i < N; i++) {
+                waitpid(pids[i], NULL, 0);
+            }
+            
+            dup2(main_out, STDOUT_FILENO);
+            printf("Game over!\n");
+            break;
+        }
+        
+        printf("Bad command. Type 'h' for help.\n");
     }
     
     return 0;
