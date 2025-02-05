@@ -71,6 +71,7 @@ int main(int argc, char *argv[]) {
 
     while(M[2] != 0); // wait till all followers exit
 
+    sleep(1);
     shmdt(M);           // detach shared memory
     shmctl(shmid, IPC_RMID, NULL); // delete shared memory
 
