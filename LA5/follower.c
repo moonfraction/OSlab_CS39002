@@ -13,7 +13,7 @@ int main(int argc, char *argv[]){
     }
 
     // number of followers wanting to join
-    int nf = 10;
+    int nf = 1;
     if(argc == 2){
         nf = atoi(argv[1]);
     }
@@ -27,7 +27,7 @@ int main(int argc, char *argv[]){
         int pid = fork();
         if(pid == 0){
             // follower
-            srand(getpid());
+            srand(getpid() * time(NULL));
 
             int shmid = shmget(key, 0, 0777);
             if (shmid == -1) {

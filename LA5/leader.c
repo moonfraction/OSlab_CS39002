@@ -58,7 +58,7 @@ int main(int argc, char *argv[]) {
         if(sums[cur] == 1) flag = 1;
 
         for(int i=0; i<=n; i++){
-            if(i != 0) printf("+");
+            if(i != 0) printf(" + ");
             printf("%d", M[3+i]);
         }
         printf(" = %d\n", cur);
