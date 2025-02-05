@@ -27,7 +27,7 @@ int main(int argc, char *argv[]){
         int pid = fork();
         if(pid == 0){
             // follower
-            srand(time(NULL) * pid);
+            srand(getpid());
 
             int shmid = shmget(key, 0, 0777);
             if (shmid == -1) {
@@ -59,7 +59,7 @@ int main(int argc, char *argv[]){
                 else if(M[2] == -f_no) {
                     printf("follower %d leaves\n", f_no);
                     if(M[2] == -n) M[2] = 0;
-                    else M[2] = -M[2] - 1;
+                    else M[2] = M[2] - 1;
                     shmdt(M);
                     if(M[2] == -n) break;
                 }

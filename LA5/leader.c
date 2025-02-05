@@ -8,12 +8,14 @@
 
 int main(int argc, char *argv[]) {
     srand(time(NULL));
-
-    if(argc != 2){
-        printf("Usage: %s <n>\n", argv[0]);
+    if(argc != 2 && argc != 1){
+        printf("Usage: %s <n>\n or \n%s\n", argv[0], argv[0]);
         exit(1);
     }
-    int n = atoi(argv[1]);
+    int n = 10;
+    if(argc == 2){
+        n = atoi(argv[1]);
+    }
     if(n>100 || n<1){
         printf("n should be less than 100 and greater than 0\n");
         exit(1);
@@ -43,27 +45,26 @@ int main(int argc, char *argv[]) {
 
     int flag = 0;
     while(flag == 0){
+        // next loop
+        int l_no = 1 + rand()%99;
+        M[3] = l_no;
+
+        M[2] = 1; // give turn to follower 1
+
         while(M[2] != 0); // wait for leader turn
 
         int cur = 0;
         for(int i=0; i<=n; i++) cur += M[3+i];
-        if(sums[cur] == 1){
-            flag = 1;
-            break;
-        }
-        sums[cur] = 1;
+        if(sums[cur] == 1) flag = 1;
 
         for(int i=0; i<=n; i++){
             if(i != 0) printf("+");
             printf("%d", M[3+i]);
         }
         printf(" = %d\n", cur);
-
-        // next loop
-        int l_no = 1 + rand()%99;
-        M[3] = l_no;
-
-        M[2] = 1; // give turn to follower 1
+        
+        if(flag == 1) break;
+        sums[cur] = 1;
     }
 
     M[2] = -1;
