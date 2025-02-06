@@ -63,6 +63,7 @@ int main(int argc, char *argv[]){
                     shmdt(M);
                     if(M[2] == -n) break;
                 }
+                usleep(1000);
             }
         }
     }

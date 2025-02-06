@@ -51,7 +51,9 @@ int main(int argc, char *argv[]) {
 
         M[2] = 1; // give turn to follower 1
 
-        while(M[2] != 0); // wait for leader turn
+        while(M[2] != 0){
+            usleep(1000);
+        }; // wait for leader turn
 
         int cur = 0;
         for(int i=0; i<=n; i++) cur += M[3+i];
@@ -69,7 +71,9 @@ int main(int argc, char *argv[]) {
 
     M[2] = -1;
 
-    while(M[2] != 0); // wait till all followers exit
+    while(M[2] != 0){
+        usleep(1000);
+    }; // wait till all followers exit
 
     sleep(1);
     shmdt(M);           // detach shared memory
