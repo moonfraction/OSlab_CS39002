@@ -67,18 +67,17 @@ int main()
 
 		for (i=0; i < 10; i++) {
 
-			sprintf(line,"%d",n); /* Since write() accepts only
+			sprintf(line,"%d",i); /* Since write() accepts only
 						       arrays of bytes, we
 						       first write the integer n
 						       into the char array "line"
 					          */
 			write(fd[1], line, BUFSIZE);
 			printf("Child writes: %d\n",i);
-			sleep(2);
+			sleep(1);
 		}
 	}
 	else {
-
 		close(fd[1]); /* The parent will not write and
 				     hence we close fd[1]
 			        */
