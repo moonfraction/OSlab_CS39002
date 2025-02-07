@@ -28,7 +28,7 @@ void createchild ( )
       cpid[i] = fork();
       if (cpid[i] == 0) {
          sprintf(cno, "%d", i);
-         execlp("child", "./child", cno, NULL);
+         execlp("./child", "./child", cno, NULL);
       } else {
          state[i] = PLAYING;
          fprintf(fp, "%d\n", cpid[i]); fflush(fp);
