@@ -205,13 +205,14 @@ int main(){
         int diff = arrival_time - prev_arrival_time; // this is >=0 as per gencustomers code
         // sleep for the difference in arrival time
         usleep(diff * TIME_SF);
-        prev_arrival_time = arrival_time;
-
+        
         // update time
         sem_op(semid_mutex, 0, P); // lock mutex
         int cur_time = prev_arrival_time;
         int new_time = update_sim_time(M, cur_time, diff);
         sem_op(semid_mutex, 0, V); // release mutex
+        
+        prev_arrival_time = new_time;
     }
 
     // detach shared memory
