@@ -74,14 +74,6 @@ void wmain(int waiter_id){
     // get waiter offset
     int waiter_offset = waiters_offset[waiter_id];
 
-    // get waiter semaphore
-    int semid_waiter = semget(ftok(FTOK_PATH, SEM_WAITER), 5, 0666);
-    if (semid_waiter == -1) {
-        char error_msg[100];
-        sprintf(error_msg, "semget failed in waiter %c", WAITERS[waiter_id]);
-        perror(error_msg);
-        exit(1);
-    }
 
     while(1){
         // wait for signal (from new customer or cook)
@@ -121,7 +113,8 @@ void wmain(int waiter_id){
             // 2. print placing order
             // 3. update placing order, that have not been served yet
             // 4. add order to cooking queue
-            // 5. signal cook that order is placed
+            // 5. signal customer that order is placed
+            // 6. signal cook that order is placed
 
             sem_op(semid_mutex, 0, P); // lock mutex
             // update time
@@ -137,6 +130,9 @@ void wmain(int waiter_id){
             // add order to cooking queue
             eq_CQ(M, waiter_id, cus_id, cus_cnt);
             sem_op(semid_cook, 0, V); // signal cook that order is placed
+
+            // signal customer that order is placed
+            sem_op(semid_cus, cus_id, V);
 
             sem_op(semid_mutex, 0, V); // release mutex
 
@@ -171,7 +167,7 @@ void wmain(int waiter_id){
 int main(){
     // get shared memory
     key_t shm_key = ftok(FTOK_PATH, SHM_ID);
-    shmid = shmget(shm_key, 2000*sizeof(int), IPC_CREAT | 0666);
+    shmid = shmget(shm_key, 2000*sizeof(int), 0666);
     if (shmid == -1) {
         perror("shmget failed in waiter wrapper");
         exit(1);
@@ -181,8 +177,9 @@ int main(){
     get_sem(); 
 
     // fork waiter processes
+    pid_t pid;
     for (int i = 0; i < 5; i++) {
-        int pid = fork();
+        pid = fork();
         if (pid == -1) {
             perror("fork failed in waiter wrapper");
             exit(1);
