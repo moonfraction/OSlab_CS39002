@@ -162,7 +162,7 @@ void cmain(int cook_id){
         int fr = M[WQoff + FRid]; // food ready index
         M[fr] = cus_id; // write cus_id in waiter queue
         sem_op(semid_waiter, waiter_id, V); // signal waiter that food is ready
-        sem_op(semid_mutex, 1, V); // release mutex
+        sem_op(semid_mutex, 0, V); // release mutex
 
 
         // if time > 240, and no order in queue, break
@@ -216,6 +216,9 @@ int main(){
         exit(1);
     }
 
+    // lock mutex before initializing shared memory
+    sem_op(semid_mutex, 0, P);
+    
     // init shared memory
     M[Tid] = 0; // time
     M[ETid] = 10; // no. of empty table
@@ -232,6 +235,9 @@ int main(){
     init_waiter_queue(M, WWoff);
     init_waiter_queue(M, WXoff);
     init_waiter_queue(M, WYoff);
+    
+    // release mutex after initialization
+    sem_op(semid_mutex, 0, V);
 
     // detach shared memory
     if (shmdt(M) == -1) {
