@@ -4,6 +4,6 @@ all:
 	gcc -Wall -o customer customer.c
 db:
 	gcc -Wall -o gencustomers gencustomers.c
- 	./gencustomers > customers.txt
+	./gencustomers > customers.txt
 clean:
 	-rm -f cook waiter customer gencustomers

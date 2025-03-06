@@ -1,4 +1,6 @@
 #include "common.h"
+#include <sys/shm.h>
+#include <sys/wait.h>
 
 int shmid;
 int semid_mutex;
@@ -6,6 +8,34 @@ int semid_cook;
 int semid_waiter;
 int semid_cus;
 
+
+void sem_op(int semid, int sem_num, int sem_op_val) {
+    struct sembuf sop;
+    sop.sem_num = sem_num;
+    sop.sem_op = sem_op_val;
+    sop.sem_flg = 0;
+    if (semop(semid, &sop, 1) == -1) {
+        perror("semop failed");
+        exit(1);
+    }
+}
+void print_time(int minutes) {
+    int hours = 11 + minutes / 60;
+    int mins = minutes % 60;
+    char am_pm = (hours < 12) ? 'a' : 'p';
+    hours = hours % 12;
+    if (hours == 0) hours = 12;
+    printf("[%d:%02d %cm] ", hours, mins, am_pm);
+}
+int update_sim_time(int *M, int time_before, int delay) {
+    int time_after = time_before + delay;
+    if(time_after < M[Tid]) {
+        printf("Warning: setting time fails\n");
+        return M[Tid];
+    }
+    M[Tid] = time_after;
+    return time_after;
+}
 
 void get_sem(){
     semid_mutex = semget(ftok(FTOK_PATH, SEM_MUTEX), 1, 0666);
@@ -47,7 +77,6 @@ int dq_WQ(int *M, int waiter_id, int *cus_id, int *cus_cnt){
 }
 
 void eq_CQ(int *M, int waiter_id, int cus_id, int cus_cnt){
-    int cook_offset = M[CQoff];
     int rear = M[CQB];
     M[CQoff + rear] = waiter_id;
     M[CQoff + rear + 1] = cus_id;

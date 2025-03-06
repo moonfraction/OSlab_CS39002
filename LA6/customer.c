@@ -1,10 +1,41 @@
 #include "common.h"
+#include <sys/shm.h>
+#include <sys/wait.h>
 
 int shmid;
 int semid_mutex;
 int semid_cook;// no need
 int semid_waiter;
 int semid_cus;
+
+
+void sem_op(int semid, int sem_num, int sem_op_val) {
+    struct sembuf sop;
+    sop.sem_num = sem_num;
+    sop.sem_op = sem_op_val;
+    sop.sem_flg = 0;
+    if (semop(semid, &sop, 1) == -1) {
+        perror("semop failed");
+        exit(1);
+    }
+}
+void print_time(int minutes) {
+    int hours = 11 + minutes / 60;
+    int mins = minutes % 60;
+    char am_pm = (hours < 12) ? 'a' : 'p';
+    hours = hours % 12;
+    if (hours == 0) hours = 12;
+    printf("[%d:%02d %cm] ", hours, mins, am_pm);
+}
+int update_sim_time(int *M, int time_before, int delay) {
+    int time_after = time_before + delay;
+    if(time_after < M[Tid]) {
+        printf("Warning: setting time fails\n");
+        return M[Tid];
+    }
+    M[Tid] = time_after;
+    return time_after;
+}
 
 void get_sem(){
     semid_mutex = semget(ftok(FTOK_PATH, SEM_MUTEX), 1, 0666);
@@ -77,7 +108,6 @@ void cmain(int cus_id, int arrival_time, int cus_cnt){
     sem_op(semid_mutex, 0, V); // release mutex
 
     // write in waiter queue
-    int waiter_offset = waiters_offset[waiter_id];
     sem_op(semid_mutex, 0, P); // lock mutex
     eq_WQ(M, waiter_id, cus_id, cus_cnt);
     sem_op(semid_mutex, 0, V); // release mutex
@@ -131,7 +161,7 @@ void cmain(int cus_id, int arrival_time, int cus_cnt){
 int main(){
     // get shared memory
     key_t shm_key = ftok(FTOK_PATH, SHM_ID);
-    shmid = shmget(shm_key, 2000*sizeof(int) | 0666);
+    shmid = shmget(shm_key, 2000*sizeof(int), 0666);
     if (shmid == -1) {
         perror("shmget failed in waiter wrapper");
         exit(1);
@@ -141,7 +171,7 @@ int main(){
     get_sem(); 
 
     // read customer.txt
-    FILE *fp = fopen("customer.txt", "r");
+    FILE *fp = fopen("customers.txt", "r");
     if (fp == NULL) {
         perror("fopen failed in customer wrapper");
         exit(1);
@@ -150,7 +180,9 @@ int main(){
     int cus_id, arrival_time, cus_cnt;
     int prev_arrival_time = 0;
     pid_t pid;
+    int total_customers = 0;
     while (fscanf(fp, "%d %d %d", &cus_id, &arrival_time, &cus_cnt) == 3 && cus_id != -1) {
+        total_customers++;
         pid = fork();
         if (pid == -1) {
             perror("fork failed in customer wrapper");
@@ -167,5 +199,22 @@ int main(){
         usleep(diff * TIME_SF);
         prev_arrival_time = arrival_time;
     }
+
+    // close file
+    fclose(fp);
+
+    // wait for all children to exit
+    for (int i = 0; i < total_customers; i++) {
+        wait(NULL);
+    }
+
+    // clean up
+    semctl(semid_mutex, 0, IPC_RMID);
+    semctl(semid_cook, 0, IPC_RMID);
+    semctl(semid_waiter, 0, IPC_RMID);
+    semctl(semid_cus, 0, IPC_RMID);
+    shmctl(shmid, IPC_RMID, NULL);
+
+    return 0;
 
 }
