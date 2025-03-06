@@ -177,6 +177,14 @@ int main(){
         exit(1);
     }
 
+    // attach shared memory
+    int *M = shmat(shmid, NULL, 0);
+    if (M == (void *)-1) {
+        perror("shmat failed in customer wrapper");
+        exit(1);
+    }
+
+
     int cus_id, arrival_time, cus_cnt;
     int prev_arrival_time = 0;
     pid_t pid;
@@ -198,6 +206,18 @@ int main(){
         // sleep for the difference in arrival time
         usleep(diff * TIME_SF);
         prev_arrival_time = arrival_time;
+
+        // update time
+        sem_op(semid_mutex, 0, P); // lock mutex
+        int cur_time = prev_arrival_time;
+        int new_time = update_sim_time(M, cur_time, diff);
+        sem_op(semid_mutex, 0, V); // release mutex
+    }
+
+    // detach shared memory
+    if (shmdt(M) == -1) {
+        perror("shmdt failed in customer wrapper");
+        exit(1);
     }
 
     // close file

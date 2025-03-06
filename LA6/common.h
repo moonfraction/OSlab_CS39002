@@ -12,10 +12,10 @@
 #define COOKS "CD"
 #define WAITERS "UVWXY"
 #define S1 ""
-#define S2 "\t"
-#define S3 "\t\t"
-#define S4 "\t\t\t"
-#define S5 "\t\t\t\t"
+#define S2 "  "
+#define S3 "    "
+#define S4 "      "
+#define S5 "        "
 
 const char* spc[] = {S1, S2, S3, S4, S5};
 
