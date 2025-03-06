@@ -69,8 +69,8 @@ void init_sem(int semid, int sem_num, int sem_val) {
 void init_waiter_queue(int *M, int WQoff){
     M[WQoff + FRid] = 0; // stores cus id (a pos integer) whose food is ready
     M[WQoff + POid] = 0; // no. of customers that have placed order and are waiting for food
-    M[WQoff + F] = 0; // front index
-    M[WQoff + B] = 0; // back index
+    M[WQoff + F] = 4; // front index
+    M[WQoff + B] = 4; // back index
 }
 
 // handle dequeuing from cooking queue
