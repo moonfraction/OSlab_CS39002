@@ -1,0 +1,9 @@
+ipcrm -S 0x4d1023c2
+ipcrm -S 0x431023c2
+ipcrm -S 0x571023c2
+ipcrm -S 0x551023c2
+ipcrm -M 0x531023c2
+
+ipcs -s
+
+ipcs -m
