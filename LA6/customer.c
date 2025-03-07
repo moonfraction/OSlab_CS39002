@@ -33,7 +33,10 @@ int update_sim_time(int *M, int time_before, int delay) {
         printf("Warning: setting time fails\n");
         return M[Tid];
     }
+    
+    sem_op(semid_mutex, 0, P); // lock 
     M[Tid] = time_after;
+    sem_op(semid_mutex, 0, V); // unlock
     return time_after;
 }
 
@@ -132,7 +135,6 @@ void cmain(int cus_id, int arrival_time, int cus_cnt){
     sem_op(semid_mutex, 0, P); // lock mutex
     cur_time = M[Tid];
     sem_op(semid_mutex, 0, V); // release mutex
-
     print_time(cur_time);
     printf("%sCustomer %d gets food [Waiting time = %d]\n", spc[2], cus_id, cur_time - arrival_time);
 
@@ -140,11 +142,12 @@ void cmain(int cus_id, int arrival_time, int cus_cnt){
     int eat_delay = 30;
     usleep(eat_delay * TIME_SF);
 
+    // eat delay time update
+    int new_time = update_sim_time(M, cur_time, eat_delay);
+
     // release table and update time
     sem_op(semid_mutex, 0, P); // lock mutex
     M[ETid]++; // inc empty table
-    M[Tid] = cur_time + eat_delay; // update time
-    int new_time = M[Tid];
     sem_op(semid_mutex, 0, V); // release mutex
 
     // leave
@@ -196,16 +199,6 @@ int main(){
     pid_t pid;
     int total_customers = 0;
     while (fscanf(fp, "%d %d %d", &cus_id, &arrival_time, &cus_cnt) == 3 && cus_id != -1) {
-        total_customers++;
-        pid = fork();
-        if (pid == -1) {
-            perror("fork failed in customer wrapper");
-            exit(1);
-        }
-        else if (pid == 0) {
-            cmain(cus_id, arrival_time, cus_cnt); // cmain does not return, the child process will exit
-        }
-        
         // parent process
         // sleep for the difference in arrival time
         int diff = arrival_time - prev_arrival_time; // this is >=0 as per gencustomers code
@@ -218,6 +211,16 @@ int main(){
         sem_op(semid_mutex, 0, V); // release mutex
         
         prev_arrival_time = arrival_time;
+
+        total_customers++;
+        pid = fork();
+        if (pid == -1) {
+            perror("fork failed in customer wrapper");
+            exit(1);
+        }
+        else if (pid == 0) {
+            cmain(cus_id, arrival_time, cus_cnt); // cmain does not return, the child process will exit
+        }
     }
 
     // detach shared memory
