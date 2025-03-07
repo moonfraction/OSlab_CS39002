@@ -115,8 +115,9 @@ void cmain(int cus_id, int arrival_time, int cus_cnt){
     // wake up waiter to take order
     sem_op(semid_waiter, waiter_id, V);
 
-    // wait for waiter to attend that order is placed
+    // wait for waiter to tell that order is placed
     sem_op(semid_cus, cus_id, P);
+
     sem_op(semid_mutex, 0, P); // lock mutex
     int cur_time = M[Tid];
     sem_op(semid_mutex, 0, V); // release mutex
@@ -125,9 +126,11 @@ void cmain(int cus_id, int arrival_time, int cus_cnt){
 
     // wait for food to be served
     sem_op(semid_cus, cus_id, P);
+
     sem_op(semid_mutex, 0, P); // lock mutex
     cur_time = M[Tid];
     sem_op(semid_mutex, 0, V); // release mutex
+
     print_time(cur_time);
     printf("%sCustomer %d gets food [Waiting time = %d]\n", spc[2], cus_id, cur_time - arrival_time);
 
@@ -138,7 +141,8 @@ void cmain(int cus_id, int arrival_time, int cus_cnt){
     // release table and update time
     sem_op(semid_mutex, 0, P); // lock mutex
     M[ETid]++; // inc empty table
-    int new_time = update_sim_time(M, cur_time, eat_delay);
+    M[Tid] = cur_time + eat_delay; // update time
+    int new_time = M[Tid];
     sem_op(semid_mutex, 0, V); // release mutex
 
     // leave
@@ -208,11 +212,10 @@ int main(){
         
         // update time
         sem_op(semid_mutex, 0, P); // lock mutex
-        int cur_time = prev_arrival_time;
-        int new_time = update_sim_time(M, cur_time, diff);
+        M[Tid] = arrival_time;
         sem_op(semid_mutex, 0, V); // release mutex
         
-        prev_arrival_time = new_time;
+        prev_arrival_time = arrival_time;
     }
 
     // detach shared memory

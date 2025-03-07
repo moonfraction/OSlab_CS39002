@@ -33,7 +33,10 @@ int update_sim_time(int *M, int time_before, int delay) {
         printf("Warning: setting time fails\n");
         return M[Tid];
     }
+    
+    sem_op(semid_mutex, 0, P); //lock 
     M[Tid] = time_after;
+    sem_op(semid_mutex, 0, V); //unlock
     return time_after;
 }
 
@@ -73,6 +76,8 @@ int dq_WQ(int *M, int waiter_id, int *cus_id, int *cus_cnt){
     *cus_cnt = M[waiter_offset + front + 1];
     M[waiter_offset + F] = (front + 2); // pop from waiter queue
 
+    /* NOTE: can handle when the queue is empty after this customer order is placed */
+    // but that we are checking from M[water_offset + POid]
     return 0;
 }
 
@@ -145,38 +150,43 @@ void wmain(int waiter_id){
             // 5. signal customer that order is placed
             // 6. signal cook that order is placed
 
-            sem_op(semid_mutex, 0, P); // lock mutex
-            // update time
+            // update time -> 
             int new_time = update_sim_time(M, cur_time, take_delay);
             
             // print placing order
             print_time(new_time);
             printf("%sWaiter %c: Placing order for Customer %d (Count %d)\n", spc[waiter_id], WAITERS[waiter_id], cus_id, cus_cnt);
-
+            
             // update placing order
+            sem_op(semid_mutex, 0, P); // lock mutex
             M[waiter_offset + POid]++; // that have not been served yet
+            sem_op(semid_mutex, 0, V); // release mutex
 
             // add order to cooking queue
+            sem_op(semid_mutex, 0, P); // lock mutex
             eq_CQ(M, waiter_id, cus_id, cus_cnt);
-            sem_op(semid_cook, 0, V); // signal cook that order is placed
+            sem_op(semid_mutex, 0, V); // release mutex
+
+            // signal cook that order is placed
+            sem_op(semid_cook, 0, V); 
 
             // signal customer that order is placed
             sem_op(semid_cus, cus_id, V);
 
-            sem_op(semid_mutex, 0, V); // release mutex
 
         }
         else{ // food is ready
             // serve food to customer
             print_time(cur_time);
             printf("%sWaiter %c: Serving food to Customer %d\n", spc[waiter_id], WAITERS[waiter_id], cus_id);
-            sem_op(semid_cus, cus_id, V); // signal customer that food is served
-
+            
             // reset cus_id in waiter queue and dec the placing order 
             sem_op(semid_mutex, 0, P); // lock mutex
             M[waiter_offset + FRid] = 0; // reset cus_id
             M[waiter_offset + POid]--; // dec placing order
             sem_op(semid_mutex, 0, V); // release mutex
+            
+            sem_op(semid_cus, cus_id, V); // signal customer that food is served
         }
     }
 

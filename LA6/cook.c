@@ -34,7 +34,10 @@ int update_sim_time(int *M, int time_before, int delay) {
         printf("Warning: setting time fails\n");
         return M[Tid];
     }
+    
+    sem_op(semid_mutex, 0, P); //lock 
     M[Tid] = time_after;
+    sem_op(semid_mutex, 0, V); //unlock
     return time_after;
 }
 
@@ -83,7 +86,7 @@ int dq_CQ(int *M, int *waiter_id, int *cus_id, int *cus_cnt){
     *waiter_id = M[CQoff + front];
     *cus_id = M[CQoff + front + 1];
     *cus_cnt = M[CQoff + front + 2];
-    M[CQF] = (CQoff + front + 3); // pop from cooking queue
+    M[CQF] = (front + 3); // pop from cooking queue
     
     // check if the queue is empty, after preparing the order
     if(M[CQF] == M[CQB]) return 1;
@@ -147,22 +150,21 @@ void cmain(int cook_id){
         int cook_delay = 5 * cus_cnt;
         usleep(cook_delay * TIME_SF);
         
-        sem_op(semid_mutex, 0, P); // lock mutex to update time
+        // update time
         int new_time = update_sim_time(M, cur_time, cook_delay);
-        sem_op(semid_mutex, 0, V); // release mutex
 
         print_time(new_time);
         printf("%sCook %c: Prepared order (Waiter %c, Customer %d, Count %d)\n", spc[cook_id], COOKS[cook_id], WAITERS[waiter_id], cus_id, cus_cnt);
 
-
         // about to signal waiter that food is ready
         // write cus_id in waiter queue
         int WQoff = waiters_offset[waiter_id];
+        int fr = WQoff + FRid; // food ready index
         sem_op(semid_mutex, 0, P); // lock mutex
-        int fr = M[WQoff + FRid]; // food ready index
         M[fr] = cus_id; // write cus_id in waiter queue
-        sem_op(semid_waiter, waiter_id, V); // signal waiter that food is ready
         sem_op(semid_mutex, 0, V); // release mutex
+
+        sem_op(semid_waiter, waiter_id, V); // signal waiter that food is ready
 
 
         // if time > 240, and no order in queue, break
