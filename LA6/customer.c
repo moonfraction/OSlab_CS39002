@@ -74,6 +74,7 @@ void eq_WQ(int *M, int waiter_id, int cus_id, int cus_cnt){
 void cmain(int cus_id, int arrival_time, int cus_cnt){
     // check time
     if(arrival_time > 240){
+        print_time(arrival_time);
         printf("%sCustomer %dleaves (late arrival)\n", spc[4], cus_id);
         exit(0);
     }
@@ -91,6 +92,7 @@ void cmain(int cus_id, int arrival_time, int cus_cnt){
     if(M[ETid] == 0){
         // no empty table
         sem_op(semid_mutex, 0, V); // release mutex
+        print_time(arrival_time);
         printf("%sCustomer %d leaves (no empty table)\n", spc[4], cus_id);
         exit(0);
     }
@@ -232,7 +234,10 @@ int main(){
         wait(NULL);
     }
 
+    sleep(2);  // Give processes time to finish
+
     // clean up
+    printf("Cleaning up...\n");
     semctl(semid_mutex, 0, IPC_RMID);
     semctl(semid_cook, 0, IPC_RMID);
     semctl(semid_waiter, 0, IPC_RMID);

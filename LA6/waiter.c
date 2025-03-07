@@ -185,7 +185,7 @@ void wmain(int waiter_id){
             M[waiter_offset + FRid] = 0; // reset cus_id
             M[waiter_offset + POid]--; // dec placing order
             sem_op(semid_mutex, 0, V); // release mutex
-            
+
             sem_op(semid_cus, cus_id, V); // signal customer that food is served
         }
     }
@@ -234,5 +234,6 @@ int main(){
         wait(NULL);
     }
 
+    printf("Waiters done, exiting without removing IPCs\n");
     return 0;
 }

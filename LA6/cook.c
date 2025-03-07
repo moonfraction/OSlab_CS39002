@@ -267,13 +267,14 @@ int main(){
     if(pid_D == 0) {
         print_time(0);
         printf("%sCook %c ready\n", spc[1], COOKS[1]);
-        cmain(0); // cmain does not return, the child process will exit
+        cmain(1); // cmain does not return, the child process will exit
     }
     
     // wait for children cooks C and D to finish
     wait(NULL);
     wait(NULL);
 
+    printf("Cooks done, exiting without removing IPCs\n");
     return 0;
 
 }
