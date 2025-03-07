@@ -225,6 +225,7 @@ int main(){
             exit(1);
         }
         else if (pid == 0) {
+            print_time(0);
             printf("%sWaiter %c is ready\n", spc[i], WAITERS[i]);
             wmain(i); // wmain does not return, the child process will exit
         }
