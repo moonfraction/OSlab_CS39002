@@ -274,7 +274,7 @@ int main(){
     wait(NULL);
     wait(NULL);
 
-    printf("Cooks done, exiting without removing IPCs\n");
+    // printf("Cooks done, exiting without removing IPCs\n");
     return 0;
 
 }

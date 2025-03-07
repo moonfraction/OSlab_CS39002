@@ -237,10 +237,11 @@ int main(){
         wait(NULL);
     }
 
-    sleep(2);  // Give processes time to finish
+    // comment after debug
+    // sleep(2);  // Give processes time to finish
 
     // clean up
-    printf("Cleaning up...\n");
+    // printf("Cleaning up...\n");
     semctl(semid_mutex, 0, IPC_RMID);
     semctl(semid_cook, 0, IPC_RMID);
     semctl(semid_waiter, 0, IPC_RMID);

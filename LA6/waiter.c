@@ -126,10 +126,11 @@ void wmain(int waiter_id){
             sem_op(semid_mutex, 0, P); // lock mutex to get customer
             int cus_id, cus_cnt;
             int ret = dq_WQ(M, waiter_id, &cus_id, &cus_cnt);
+            int pending_orders = M[waiter_offset + POid]; // Check pending orders
             sem_op(semid_mutex, 0, V); // release mutex
-
-            // if no customer in queue, and time is up, break
-            if(ret == -1 && cur_time > 240){ 
+            
+            // Only exit if: no customer in queue AND no pending orders AND time is up
+            if(ret == -1 && pending_orders == 0 && cur_time > 240){
                 print_waiter_exit(cur_time, waiter_id);
                 break;
             }
@@ -234,6 +235,6 @@ int main(){
         wait(NULL);
     }
 
-    printf("Waiters done, exiting without removing IPCs\n");
+    // printf("Waiters done, exiting without removing IPCs\n");
     return 0;
 }
