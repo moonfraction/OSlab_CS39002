@@ -7,6 +7,7 @@ int semid_mutex;
 int semid_cook;
 int semid_waiter;
 int semid_cus;
+int semid_output;
 
 
 void sem_op(int semid, int sem_num, int sem_op_val) {
@@ -65,6 +66,12 @@ void get_sem(){
         perror("semget failed in waiter wrapper");
         exit(1);
     }
+
+    semid_output = semget(ftok(FTOK_PATH, SEM_OUTPUT), 1, 0666);
+    if(semid_output == -1){
+        perror("semget failed in waiter wrapper");
+        exit(1);
+    }
 }
 
 int dq_WQ(int *M, int waiter_id, int *cus_id, int *cus_cnt){
@@ -91,9 +98,11 @@ void eq_CQ(int *M, int waiter_id, int cus_id, int cus_cnt){
 }
 
 void print_waiter_exit(int time, int waiter_id){
+    sem_op(semid_output, 0, P);
     print_time(time);
     printf("%sWaiter %c leaving (no more customer to serve)\n", spc[waiter_id], WAITERS[waiter_id]);
     fflush(stdout);
+    sem_op(semid_output, 0, V);
 }
 
 // waiter main
@@ -157,9 +166,11 @@ void wmain(int waiter_id){
             int new_time = update_sim_time(M, cur_time, take_delay);
             
             // print placing order
+            sem_op(semid_output, 0, P);
             print_time(new_time);
             printf("%sWaiter %c: Placing order for Customer %d (Count %d)\n", spc[waiter_id], WAITERS[waiter_id], cus_id, cus_cnt);
             fflush(stdout);
+            sem_op(semid_output, 0, V);
             
             // update placing order
             sem_op(semid_mutex, 0, P); // lock mutex
@@ -181,9 +192,11 @@ void wmain(int waiter_id){
         }
         else{ // food is ready
             // serve food to customer
+            sem_op(semid_output, 0, P);
             print_time(cur_time);
             printf("%sWaiter %c: Serving food to Customer %d\n", spc[waiter_id], WAITERS[waiter_id], cus_id);
             fflush(stdout);
+            sem_op(semid_output, 0, V);
             
             // reset cus_id in waiter queue and dec the placing order 
             sem_op(semid_mutex, 0, P); // lock mutex
@@ -229,9 +242,11 @@ int main(){
             exit(1);
         }
         else if (pid == 0) {
+            sem_op(semid_output, 0, P);
             print_time(0);
             printf("%sWaiter %c is ready\n", spc[i], WAITERS[i]);
             fflush(stdout);
+            sem_op(semid_output, 0, V);
             wmain(i); // wmain does not return, the child process will exit
         }
     }

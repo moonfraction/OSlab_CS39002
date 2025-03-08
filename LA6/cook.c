@@ -8,6 +8,7 @@ int semid_mutex;
 int semid_cook;
 int semid_waiter;
 int semid_cus;
+int semid_output;
 
 void sem_op(int semid, int sem_num, int sem_op_val) {
     struct sembuf sop;
@@ -104,9 +105,11 @@ void wake_all_waiters(){
 
 // print cook exit message
 void print_cook_exit(int time, int cook_id){
+    sem_op(semid_output, 0, P);
     print_time(time);
     printf("%sCook %c: Leaving\n", spc[cook_id], COOKS[cook_id]);
     fflush(stdout);
+    sem_op(semid_output, 0, V);
 }
 
 // cooks main
@@ -144,9 +147,11 @@ void cmain(int cook_id){
         }
 
         // cook food
+        sem_op(semid_output, 0, P);
         print_time(cur_time); 
         printf("%sCook %c: Preparing order (Waiter %c, Customer %d, Count %d)\n", spc[cook_id], COOKS[cook_id], WAITERS[waiter_id], cus_id, cus_cnt);
         fflush(stdout);
+        sem_op(semid_output, 0, V);
 
         
         // Prepared order -> cook delay
@@ -156,9 +161,11 @@ void cmain(int cook_id){
         // update time
         int new_time = update_sim_time(M, cur_time, cook_delay);
 
+        sem_op(semid_output, 0, P);
         print_time(new_time);
         printf("%sCook %c: Prepared order (Waiter %c, Customer %d, Count %d)\n", spc[cook_id], COOKS[cook_id], WAITERS[waiter_id], cus_id, cus_cnt);
         fflush(stdout);
+        sem_op(semid_output, 0, V);
 
         // about to signal waiter that food is ready
         // write cus_id in waiter queue
@@ -202,10 +209,13 @@ int main(){
     semid_cook = create_sem(FTOK_PATH, SEM_COOK, 1);    // single cook semaphore
     semid_waiter = create_sem(FTOK_PATH, SEM_WAITER, 5); // five waiter semaphores
     semid_cus = create_sem(FTOK_PATH, SEM_CUS, 256);    // 256 customer semaphores
-    
+    semid_output = create_sem(FTOK_PATH, SEM_OUTPUT, 1); // single output semaphore
+
     // initialize semaphores
     init_sem(semid_mutex, 0, 1); // mutex semaphore
     init_sem(semid_cook, 0, 0); // cook semaphore
+    init_sem(semid_output, 0, 1); // output semaphore
+
     // initialize waiter semaphores
     for (int i = 0; i < 5; i++) {
         init_sem(semid_waiter, i, 0);
@@ -258,9 +268,11 @@ int main(){
         exit(1);
     }
     if(pid_C == 0) {
+        sem_op(semid_output, 0, P);
         print_time(0);
         printf("%sCook %c ready\n", spc[0], COOKS[0]);
         fflush(stdout);
+        sem_op(semid_output, 0, V);
         cmain(0); // cmain does not return, the child process will exit
     }
 
@@ -270,9 +282,11 @@ int main(){
         exit(1);
     }
     if(pid_D == 0) {
+        sem_op(semid_output, 0, P);
         print_time(0);
         printf("%sCook %c ready\n", spc[1], COOKS[1]);
         fflush(stdout);
+        sem_op(semid_output, 0, V);
         cmain(1); // cmain does not return, the child process will exit
     }
     

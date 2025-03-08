@@ -28,6 +28,7 @@ const char* spc[] = {S1, S2, S3, S4, S5};
 #define SEM_WAITER 'W'
 #define SEM_CUS 'U'
 #define SEM_CUSNUM 256
+#define SEM_OUTPUT 'O' // for output semaphore
 
 // global shmem indices
 #define Tid 0 // time

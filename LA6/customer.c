@@ -7,6 +7,7 @@ int semid_mutex;
 int semid_cook;// no need
 int semid_waiter;
 int semid_cus;
+int semid_output;
 
 
 void sem_op(int semid, int sem_num, int sem_op_val) {
@@ -65,6 +66,12 @@ void get_sem(){
         perror("semget failed in waiter wrapper");
         exit(1);
     }
+
+    semid_output = semget(ftok(FTOK_PATH, SEM_OUTPUT), 1, 0666);
+    if (semid_output == -1) {
+        perror("semget failed in waiter wrapper");
+        exit(1);
+    }
 }
 
 void eq_WQ(int *M, int waiter_id, int cus_id, int cus_cnt){
@@ -78,9 +85,11 @@ void eq_WQ(int *M, int waiter_id, int cus_id, int cus_cnt){
 void cmain(int cus_id, int arrival_time, int cus_cnt){
     // check time
     if(arrival_time > 240){
+        sem_op(semid_output, 0, P);
         print_time(arrival_time);
         printf("%sCustomer %d leaves (late arrival)\n", spc[4], cus_id);
         fflush(stdout);
+        sem_op(semid_output, 0, V);
         exit(0);
     }
 
@@ -97,18 +106,22 @@ void cmain(int cus_id, int arrival_time, int cus_cnt){
     if(M[ETid] == 0){
         // no empty table
         sem_op(semid_mutex, 0, V); // release mutex
+        sem_op(semid_output, 0, P);
         print_time(arrival_time);
         printf("%sCustomer %d leaves (no empty table)\n", spc[4], cus_id);
         fflush(stdout);
+        sem_op(semid_output, 0, V);
         exit(0);
     }
     M[ETid]--; // dec empty table
     sem_op(semid_mutex, 0, V); // release mutex
 
     // take table
+    sem_op(semid_output, 0, P);
     print_time(arrival_time);
     printf("Customer %d arrives (count = %d)\n", cus_id, cus_cnt);
     fflush(stdout);
+    sem_op(semid_output, 0, V);
 
     // wait for waiter -> find a waiter
     sem_op(semid_mutex, 0, P); // lock mutex
@@ -130,9 +143,11 @@ void cmain(int cus_id, int arrival_time, int cus_cnt){
     sem_op(semid_mutex, 0, P); // lock mutex
     int cur_time = M[Tid];
     sem_op(semid_mutex, 0, V); // release mutex
+    sem_op(semid_output, 0, P);
     print_time(cur_time);
     printf("%sCustomer %d: Order placed to Waiter %c\n", spc[1], cus_id, WAITERS[waiter_id]);
     fflush(stdout);
+    sem_op(semid_output, 0, V);
 
     // wait for food to be served
     sem_op(semid_cus, cus_id, P);
@@ -140,9 +155,11 @@ void cmain(int cus_id, int arrival_time, int cus_cnt){
     sem_op(semid_mutex, 0, P); // lock mutex
     cur_time = M[Tid];
     sem_op(semid_mutex, 0, V); // release mutex
+    sem_op(semid_output, 0, P);
     print_time(cur_time);
     printf("%sCustomer %d gets food [Waiting time = %d]\n", spc[2], cus_id, cur_time - arrival_time);
     fflush(stdout);
+    sem_op(semid_output, 0, V);
 
     // eat food -> delay
     int eat_delay = 30;
@@ -157,9 +174,11 @@ void cmain(int cus_id, int arrival_time, int cus_cnt){
     sem_op(semid_mutex, 0, V); // release mutex
 
     // leave
+    sem_op(semid_output, 0, P);
     print_time(new_time);
     printf("%sCustomer %d finishes eating and leaves\n", spc[3], cus_id);
     fflush(stdout);
+    sem_op(semid_output, 0, V);
 
     // detach shared memory
     if (shmdt(M) == -1) {
@@ -255,6 +274,7 @@ int main(){
     semctl(semid_waiter, 0, IPC_RMID);
     semctl(semid_cus, 0, IPC_RMID);
     shmctl(shmid, IPC_RMID, NULL);
+    shmctl(semid_output, IPC_RMID, NULL);
 
     return 0;
 
