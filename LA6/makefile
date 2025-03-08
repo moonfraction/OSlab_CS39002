@@ -8,10 +8,10 @@ db:
 	gcc -Wall -o gencustomers gencustomers.c
 	./gencustomers > customers.txt
 
-rall:
-	stdbuf -oL ./cook >> transcript_all.txt 2>&1 & 
-	stdbuf -oL ./waiter >> transcript_all.txt 2>&1 & 
-	stdbuf -oL ./customer >> transcript_all.txt 2>&1 
+rall: all
+	./cook > transcript_all.txt 2>&1 & 
+	./waiter >> transcript_all.txt 2>&1 & 
+	./customer >> transcript_all.txt 2>&1 
 
 clean:
 	rm -f cook waiter customer gencustomers transcript*

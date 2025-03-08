@@ -25,12 +25,13 @@ void print_time(int minutes) {
     char am_pm = (hours < 12) ? 'a' : 'p';
     hours = hours % 12;
     if (hours == 0) hours = 12;
-    printf("[%d:%02d %cm] ", hours, mins, am_pm);
+    printf("[%02d:%02d %cm] ", hours, mins, am_pm);
 }
 int update_sim_time(int *M, int time_before, int delay) {
     int time_after = time_before + delay;
     if(time_after < M[Tid]) {
         printf("Warning: setting time fails\n");
+        fflush(stdout);
         return M[Tid];
     }
     
@@ -92,6 +93,7 @@ void eq_CQ(int *M, int waiter_id, int cus_id, int cus_cnt){
 void print_waiter_exit(int time, int waiter_id){
     print_time(time);
     printf("%sWaiter %c leaving (no more customer to serve)\n", spc[waiter_id], WAITERS[waiter_id]);
+    fflush(stdout);
 }
 
 // waiter main
@@ -157,6 +159,7 @@ void wmain(int waiter_id){
             // print placing order
             print_time(new_time);
             printf("%sWaiter %c: Placing order for Customer %d (Count %d)\n", spc[waiter_id], WAITERS[waiter_id], cus_id, cus_cnt);
+            fflush(stdout);
             
             // update placing order
             sem_op(semid_mutex, 0, P); // lock mutex
@@ -180,6 +183,7 @@ void wmain(int waiter_id){
             // serve food to customer
             print_time(cur_time);
             printf("%sWaiter %c: Serving food to Customer %d\n", spc[waiter_id], WAITERS[waiter_id], cus_id);
+            fflush(stdout);
             
             // reset cus_id in waiter queue and dec the placing order 
             sem_op(semid_mutex, 0, P); // lock mutex
@@ -227,6 +231,7 @@ int main(){
         else if (pid == 0) {
             print_time(0);
             printf("%sWaiter %c is ready\n", spc[i], WAITERS[i]);
+            fflush(stdout);
             wmain(i); // wmain does not return, the child process will exit
         }
     }
@@ -237,5 +242,6 @@ int main(){
     }
 
     // printf("Waiters done, exiting without removing IPCs\n");
+    fflush(stdout);
     return 0;
 }

@@ -25,13 +25,14 @@ void print_time(int minutes) {
     char am_pm = (hours < 12) ? 'a' : 'p';
     hours = hours % 12;
     if (hours == 0) hours = 12;
-    printf("[%d:%02d %cm] ", hours, mins, am_pm);
+    printf("[%02d:%02d %cm] ", hours, mins, am_pm);
 }
 
 int update_sim_time(int *M, int time_before, int delay) {
     int time_after = time_before + delay;
     if(time_after < M[Tid]) {
         printf("Warning: setting time fails\n");
+        fflush(stdout);
         return M[Tid];
     }
     
@@ -105,6 +106,7 @@ void wake_all_waiters(){
 void print_cook_exit(int time, int cook_id){
     print_time(time);
     printf("%sCook %c: Leaving\n", spc[cook_id], COOKS[cook_id]);
+    fflush(stdout);
 }
 
 // cooks main
@@ -144,6 +146,7 @@ void cmain(int cook_id){
         // cook food
         print_time(cur_time); 
         printf("%sCook %c: Preparing order (Waiter %c, Customer %d, Count %d)\n", spc[cook_id], COOKS[cook_id], WAITERS[waiter_id], cus_id, cus_cnt);
+        fflush(stdout);
 
         
         // Prepared order -> cook delay
@@ -155,6 +158,7 @@ void cmain(int cook_id){
 
         print_time(new_time);
         printf("%sCook %c: Prepared order (Waiter %c, Customer %d, Count %d)\n", spc[cook_id], COOKS[cook_id], WAITERS[waiter_id], cus_id, cus_cnt);
+        fflush(stdout);
 
         // about to signal waiter that food is ready
         // write cus_id in waiter queue
@@ -256,6 +260,7 @@ int main(){
     if(pid_C == 0) {
         print_time(0);
         printf("%sCook %c ready\n", spc[0], COOKS[0]);
+        fflush(stdout);
         cmain(0); // cmain does not return, the child process will exit
     }
 
@@ -267,6 +272,7 @@ int main(){
     if(pid_D == 0) {
         print_time(0);
         printf("%sCook %c ready\n", spc[1], COOKS[1]);
+        fflush(stdout);
         cmain(1); // cmain does not return, the child process will exit
     }
     
@@ -275,6 +281,7 @@ int main(){
     wait(NULL);
 
     // printf("Cooks done, exiting without removing IPCs\n");
+    fflush(stdout);
     return 0;
 
 }

@@ -25,12 +25,13 @@ void print_time(int minutes) {
     char am_pm = (hours < 12) ? 'a' : 'p';
     hours = hours % 12;
     if (hours == 0) hours = 12;
-    printf("[%d:%02d %cm] ", hours, mins, am_pm);
+    printf("[%02d:%02d %cm] ", hours, mins, am_pm);
 }
 int update_sim_time(int *M, int time_before, int delay) {
     int time_after = time_before + delay;
     if(time_after < M[Tid]) {
         printf("Warning: setting time fails\n");
+        fflush(stdout);
         return M[Tid];
     }
     
@@ -78,7 +79,8 @@ void cmain(int cus_id, int arrival_time, int cus_cnt){
     // check time
     if(arrival_time > 240){
         print_time(arrival_time);
-        printf("%sCustomer %dleaves (late arrival)\n", spc[4], cus_id);
+        printf("%sCustomer %d leaves (late arrival)\n", spc[4], cus_id);
+        fflush(stdout);
         exit(0);
     }
 
@@ -97,6 +99,7 @@ void cmain(int cus_id, int arrival_time, int cus_cnt){
         sem_op(semid_mutex, 0, V); // release mutex
         print_time(arrival_time);
         printf("%sCustomer %d leaves (no empty table)\n", spc[4], cus_id);
+        fflush(stdout);
         exit(0);
     }
     M[ETid]--; // dec empty table
@@ -105,6 +108,7 @@ void cmain(int cus_id, int arrival_time, int cus_cnt){
     // take table
     print_time(arrival_time);
     printf("Customer %d arrives (count = %d)\n", cus_id, cus_cnt);
+    fflush(stdout);
 
     // wait for waiter -> find a waiter
     sem_op(semid_mutex, 0, P); // lock mutex
@@ -128,6 +132,7 @@ void cmain(int cus_id, int arrival_time, int cus_cnt){
     sem_op(semid_mutex, 0, V); // release mutex
     print_time(cur_time);
     printf("%sCustomer %d: Order placed to Waiter %c\n", spc[1], cus_id, WAITERS[waiter_id]);
+    fflush(stdout);
 
     // wait for food to be served
     sem_op(semid_cus, cus_id, P);
@@ -137,6 +142,7 @@ void cmain(int cus_id, int arrival_time, int cus_cnt){
     sem_op(semid_mutex, 0, V); // release mutex
     print_time(cur_time);
     printf("%sCustomer %d gets food [Waiting time = %d]\n", spc[2], cus_id, cur_time - arrival_time);
+    fflush(stdout);
 
     // eat food -> delay
     int eat_delay = 30;
@@ -153,6 +159,7 @@ void cmain(int cus_id, int arrival_time, int cus_cnt){
     // leave
     print_time(new_time);
     printf("%sCustomer %d finishes eating and leaves\n", spc[3], cus_id);
+    fflush(stdout);
 
     // detach shared memory
     if (shmdt(M) == -1) {
@@ -242,6 +249,7 @@ int main(){
 
     // clean up
     // printf("Cleaning up...\n");
+    fflush(stdout);
     semctl(semid_mutex, 0, IPC_RMID);
     semctl(semid_cook, 0, IPC_RMID);
     semctl(semid_waiter, 0, IPC_RMID);
