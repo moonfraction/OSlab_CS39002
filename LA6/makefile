@@ -10,10 +10,16 @@ db:
 
 rck: cook
 	./cook > transcript_cook.txt 2>&1 &
+	@echo "=== Cook Transcript ==="
+	@cat transcript_cook.txt
 rwt: waiter
 	./waiter > transcript_waiter.txt 2>&1 &
+	@echo "=== Waiter Transcript ==="
+	@cat transcript_waiter.txt
 rcs: customer
 	./customer > transcript_customer.txt 2>&1
+	@echo "=== Customer Transcript ==="
+	@cat transcript_customer.txt
 
 clean:
 	rm -f cook waiter customer gencustomers

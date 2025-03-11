@@ -136,7 +136,7 @@ void cmain(int cook_id){
         sem_op(semid_mutex, 0, V); // release mutex
         
         // if no order and time is up, break
-        if(ret == -1 && cur_time > 240){
+        if(ret == -1 && cur_time >= 240){
             print_cook_exit(cur_time, cook_id);
             wake_all_waiters();
             break;
