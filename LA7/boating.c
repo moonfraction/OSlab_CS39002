@@ -40,7 +40,8 @@ int *BC; // visid or -1
 int *BA; // 1 = avail
 int *BT; // ride time of cur vis
 
-pthread_barrier_t *BB; // array of barriers, 1/noat
+pthread_barrier_t *BB; // array of barriers, 1/boat
+pthread_barrier_t *exit_barriers; // barriers for exit coordination
 
 // Mutex for accessing BA, BC, BT.
 pthread_mutex_t bmtx = PTHREAD_MUTEX_INITIALIZER;
@@ -54,8 +55,8 @@ pthread_mutex_t finish_mutex = PTHREAD_MUTEX_INITIALIZER;
 // all visitors have left.
 volatile int done = 0;
 
-void sleep_min(int minutes) {
-    usleep(minutes * 100000);
+void msleep(int m) {
+    usleep(m * 100000);
 }
 
 void *boat_thread(void *arg) {
@@ -76,6 +77,7 @@ void *boat_thread(void *arg) {
         BA[i] = 1;      // mark boat avail
         
         pthread_barrier_init(&BB[i], NULL, 2);
+        pthread_barrier_init(&exit_barriers[i], NULL, 2); // Initialize exit barrier
         pthread_mutex_unlock(&bmtx);
 
         pthread_barrier_wait(&BB[i]);
@@ -89,9 +91,13 @@ void *boat_thread(void *arg) {
 
         printf("Boat        %4d    Start of ride for visitor %4d\n", i+1, visitor_id);
         fflush(stdout);
-        sleep_min(ride_time);
+        msleep(ride_time);
         printf("Boat        %4d    End of ride for visitor %4d (ride time = %4d)\n", i+1, visitor_id, ride_time);
         fflush(stdout);
+        
+        // Wait for visitor to leave before accepting a new visitor
+        pthread_barrier_wait(&exit_barriers[i]);
+        pthread_barrier_destroy(&exit_barriers[i]);
     }
     return NULL;
 }
@@ -106,7 +112,7 @@ void *visitor_thread(void *arg) {
     printf("Visitor     %4d    Starts sightseeing for %4d minutes\n", id, vtime);
     fflush(stdout);
 
-    sleep_min(vtime);
+    msleep(vtime);
 
     printf("Visitor     %4d    Ready to ride a boat (ride time = %4d)\n", id, rtime);
     fflush(stdout);
@@ -135,10 +141,13 @@ void *visitor_thread(void *arg) {
     printf("Visitor     %4d    Finds boat %4d\n", id, boat_index+1);
     fflush(stdout);
 
-    sleep_min(rtime);
+    msleep(rtime);
 
     printf("Visitor     %4d    Leaving\n", id);
     fflush(stdout);
+    
+    // Signal boat that visitor has left
+    pthread_barrier_wait(&exit_barriers[boat_index]);
 
     pthread_mutex_lock(&finish_mutex);
     finished++;
@@ -198,6 +207,7 @@ int main(int argc, char *argv[]) {
     BC = malloc(m * sizeof(int));
     BT = malloc(m * sizeof(int));
     BB = malloc(m * sizeof(pthread_barrier_t));
+    exit_barriers = malloc(m * sizeof(pthread_barrier_t));
 
     for (int i = 0; i < m; i++) {
         BA[i] = 0;    
@@ -227,6 +237,7 @@ int main(int argc, char *argv[]) {
     free(BC);
     free(BT);
     free(BB);
+    free(exit_barriers);
     free(boat_tid);
     free(visitor_tid);
 
