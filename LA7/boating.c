@@ -49,7 +49,7 @@ semaphore boat = {0, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER};
 // all visitors have left
 int vis_left;
 pthread_mutex_t vismutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t viscond = PTHREAD_COND_INITIALIZER;
+
 
 // sleep for m minutes => 1min ~ 100ms = 100000us
 void msleep(int m){
@@ -75,7 +75,7 @@ void *boat_thread(void *arg){
     while(1){
         V(&rider); // signal rider for its availability
         P(&boat); // wait for rider to board
-        
+
         // check if all visitors have left
         pthread_mutex_lock(&vismutex);
         if(vis_left == 0){
@@ -84,18 +84,15 @@ void *boat_thread(void *arg){
         }
         pthread_mutex_unlock(&vismutex);
         
-        // mark boat available
+        /*LOCK mutex -> mark boat available */
         pthread_mutex_lock(&bmtx);
         BC[i] = -1; // no visitor
         BA[i] = 1; // mark boat available
+        pthread_barrier_init(&BB[i], NULL, 2);  // init barrier
+        pthread_mutex_unlock(&bmtx); 
+        /* UNLOCK mutex */
 
-        // init barrier
-        pthread_barrier_init(&BB[i], NULL, 2);
-        pthread_mutex_unlock(&bmtx); // unlock mutex
-
-        // boat made available for visitors tp ride
-        // printf("Boat      %4d    Ready\n", i+1);
-        // fflush(stdout);
+        // boat made available for visitors to ride
 
         // wait for visitor to board
         // -> (one[boat] is waiting at the barrier, another visitor will come and lift the barrier)
@@ -147,6 +144,7 @@ void *visitor_thread(void *arg){
                 boat_id = i;
                 BC[i] = vis_id;
                 BT[i] = rtime;
+                pthread_barrier_wait(&BB[boat_id]);
                 break;
             }
         }
@@ -158,7 +156,6 @@ void *visitor_thread(void *arg){
     }
 
     // boat found, wait for boat to start ride
-    pthread_barrier_wait(&BB[boat_id]);
     // barrier lifted
 
     // boat started ride
@@ -170,10 +167,19 @@ void *visitor_thread(void *arg){
     printf("Visitor   %4d    Leaving\n", vis_id);
     fflush(stdout);
 
+    int vis_left_copy;
     // visitor left
     pthread_mutex_lock(&vismutex);
     vis_left--;
+    vis_left_copy = vis_left;
     pthread_mutex_unlock(&vismutex);
+
+    if(vis_left_copy == 0){
+        // last visitor left
+        for(int i = 0; i < m; i++){
+            V(&boat);
+        }
+    }
 
     pthread_exit(NULL);
 }
