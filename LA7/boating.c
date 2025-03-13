@@ -1,266 +1,234 @@
 #include <stdio.h>
-#include <pthread.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include "pthread_barrier.h" 
-// Custom barrier implementation for macOS (defined for __APPLE__)
+#include <pthread.h>
+#include <time.h>
+#include "pthread_barrier.h" // Custom barrier implementation for macOS
 
-/* counting semaphore using  mutex and condition variable */
+// Counting sem
 typedef struct {
     int value;
     pthread_mutex_t mtx;
     pthread_cond_t cv;
 } semaphore;
 
-void P(semaphore *s){
+
+void P(semaphore *s) {
     pthread_mutex_lock(&s->mtx);
     s->value--;
-    if(s->value < 0){
+    if (s->value < 0) {
         pthread_cond_wait(&s->cv, &s->mtx);
     }
     pthread_mutex_unlock(&s->mtx);
 }
 
-void V(semaphore *s){
+void V(semaphore *s) {
     pthread_mutex_lock(&s->mtx);
     s->value++;
-    if(s->value <= 0){
+    if (s->value <= 0) {
         pthread_cond_signal(&s->cv);
     }
     pthread_mutex_unlock(&s->mtx);
 }
 
-/* global shared variables  */ 
-int m; // boats
-int n; // visitors
+// Global shared variables
+int m; // no. of boats
+int n; // no. of visitors
 
-int *BA; // availability
-int *BC; // visitor id or -1
-int *BT; // ride time of current visitor
-pthread_barrier_t *BB; // array of barriers, one for each boat -> init to 2
+// Shared array for boat/visitor:
+int *BC; // visid or -1
+int *BA; // 1 = avail
+int *BT; // ride time of cur vis
 
-// mutex for accessing BA, BC, BT
+pthread_barrier_t *BB; // array of barriers, 1/noat
+
+// Mutex for accessing BA, BC, BT.
 pthread_mutex_t bmtx = PTHREAD_MUTEX_INITIALIZER;
 
-// semaphores
-semaphore rider = {0, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER};
-semaphore boat = {0, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER};
+semaphore rider_sem = { 0, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER };
+semaphore boat_sem = { 0, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER };
 
-// all visitors have left
-int vis_left;
-pthread_mutex_t vismutex = PTHREAD_MUTEX_INITIALIZER;
+int finished = 0;
+pthread_mutex_t finish_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+// all visitors have left.
+volatile int done = 0;
 
-// sleep for m minutes => 1min ~ 100ms = 100000us
-void msleep(int m){
-    usleep(m * 100000);
+void sleep_min(int minutes) {
+    usleep(minutes * 100000);
 }
 
-void init_arrays(){
-    BA = (int *) malloc(m * sizeof(int));
-    BC = (int *) malloc(m * sizeof(int));
-    BT = (int *) malloc(m * sizeof(int));
-    for(int i = 0; i < m; i++){
-        BA[i] = 0; // not available
-        BC[i] = -1; // no visitor
-        BT[i] = 0; // ride time
-    }
-}
-
-
-void *boat_thread(void *arg){
+void *boat_thread(void *arg) {
     int i = *((int *) arg);
     free(arg);
 
-    while(1){
-        V(&rider); // signal rider for its availability
-        P(&boat); // wait for rider to board
+    while (1) {
+        V(&rider_sem);
 
-        // check if all visitors have left
-        pthread_mutex_lock(&vismutex);
-        if(vis_left == 0){
-            pthread_mutex_unlock(&vismutex);
+        P(&boat_sem);
+
+        if (done) {
             break;
         }
-        pthread_mutex_unlock(&vismutex);
+
+        pthread_mutex_lock(&bmtx);
+        BC[i] = -1;     // no vis yet
+        BA[i] = 1;      // mark boat avail
         
-        /*LOCK mutex -> mark boat available */
-        pthread_mutex_lock(&bmtx);
-        BC[i] = -1; // no visitor
-        BA[i] = 1; // mark boat available
-        pthread_barrier_init(&BB[i], NULL, 2);  // init barrier
-        pthread_mutex_unlock(&bmtx); 
-        /* UNLOCK mutex */
+        pthread_barrier_init(&BB[i], NULL, 2);
+        pthread_mutex_unlock(&bmtx);
 
-        // boat made available for visitors to ride
-
-        // wait for visitor to board
-        // -> (one[boat] is waiting at the barrier, another visitor will come and lift the barrier)
         pthread_barrier_wait(&BB[i]);
-        // barrier lifted
 
-        // boat no longer available
         pthread_mutex_lock(&bmtx);
-        BA[i] = 0; // boat no longer available
+        BA[i] = 0; // boat as no longer avail
         int ride_time = BT[i];
         int visitor_id = BC[i];
         pthread_barrier_destroy(&BB[i]);
         pthread_mutex_unlock(&bmtx);
 
-        printf("Boat      %4d    Start of ride for visitor %4d\n", i+1, visitor_id);
+        printf("Boat        %4d    Start of ride for visitor %4d\n", i+1, visitor_id);
         fflush(stdout);
-        msleep(ride_time);
-
-        printf("Boat      %4d    End of ride for visitor %4d (ride time = %4d)\n", i+1, visitor_id, ride_time);
+        sleep_min(ride_time);
+        printf("Boat        %4d    End of ride for visitor %4d (ride time = %4d)\n", i+1, visitor_id, ride_time);
         fflush(stdout);
     }
-    
-    pthread_exit(NULL);
+    return NULL;
 }
 
-void *visitor_thread(void *arg){
-    int vis_id = *((int *) arg);
+void *visitor_thread(void *arg) {
+    int id = *((int *) arg);
     free(arg);
 
     int vtime = 30 + rand() % 91;
     int rtime = 15 + rand() % 46;
 
-    printf("Visitor   %4d    Starts sightseeing for %4d minutes\n", vis_id, vtime);
-    fflush(stdout);
-    msleep(vtime);
-
-    printf("Visitor   %4d    Ready to ride a boat (ride time = %4d)\n", vis_id, rtime);
+    printf("Visitor     %4d    Starts sightseeing for %4d minutes\n", id, vtime);
     fflush(stdout);
 
-    V(&boat); // signal boat for availability of vis
-    P(&rider); // wait for boat to board
+    sleep_min(vtime);
 
-    // find a boat to ride
-    int boat_id = -1;
-    while(boat_id == -1){
+    printf("Visitor     %4d    Ready to ride a boat (ride time = %4d)\n", id, rtime);
+    fflush(stdout);
+    V(&boat_sem);
+
+    P(&rider_sem);
+
+    int boat_index = -1;
+    while (boat_index == -1) {
         pthread_mutex_lock(&bmtx);
-        for(int i = 0; i < m; i++){
-            if(BA[i] == 1){
-                boat_id = i;
-                BC[i] = vis_id;
+        for (int i = 0; i < m; i++) {
+            if (BA[i] == 1 && BC[i] == -1) {
+                boat_index = i;
                 BT[i] = rtime;
-                pthread_barrier_wait(&BB[boat_id]);
+                BC[i] = id;   
+                pthread_barrier_wait(&BB[i]);
                 break;
             }
         }
         pthread_mutex_unlock(&bmtx);
-        if(boat_id == -1){
-            // no boat available, wait for next boat
-            msleep(1);
+        if (boat_index == -1) {
+            usleep(5000);
         }
     }
 
-    // boat found, wait for boat to start ride
-    // barrier lifted
-
-    // boat started ride
-    printf("Visitor   %4d    Finds boat %4d\n", vis_id, boat_id+1);
-    fflush(stdout);
-    msleep(rtime);
-
-    // boat ride over
-    printf("Visitor   %4d    Leaving\n", vis_id);
+    printf("Visitor     %4d    Finds boat %4d\n", id, boat_index+1);
     fflush(stdout);
 
-    int vis_left_copy;
-    // visitor left
-    pthread_mutex_lock(&vismutex);
-    vis_left--;
-    vis_left_copy = vis_left;
-    pthread_mutex_unlock(&vismutex);
+    sleep_min(rtime);
 
-    if(vis_left_copy == 0){
-        // last visitor left
-        for(int i = 0; i < m; i++){
-            V(&boat);
+    printf("Visitor     %4d    Leaving\n", id);
+    fflush(stdout);
+
+    pthread_mutex_lock(&finish_mutex);
+    finished++;
+    int local_finished = finished;
+    pthread_mutex_unlock(&finish_mutex);
+
+    if (local_finished >= n) {
+        done = 1;
+        for (int i = 0; i < m; i++) {
+            V(&boat_sem);
         }
     }
 
-    pthread_exit(NULL);
+    return NULL;
 }
 
-
-void create_boats(pthread_t *boat_tid){
-    for(int i = 0; i < m; i++){
-        int *arg = (int *) malloc(sizeof(int));
-        *arg = i; // 0 indexed due to the global shared arrays
-        if(pthread_create(&boat_tid[i], NULL, boat_thread, (void *) arg) != 0){
+void create_boats(pthread_t *boat_tid) {
+    for (int i = 0; i < m; i++) {
+        int *arg = malloc(sizeof(int));
+        *arg = i;
+        if (pthread_create(&boat_tid[i], NULL, boat_thread, arg) != 0) {
             perror("Failed to create boat thread");
             exit(EXIT_FAILURE);
         }
-        printf("Boat      %4d    Ready\n", i+1);
+        printf("Boat        %4d    Ready\n", i+1);
         fflush(stdout);
     }
 }
 
-void create_visitors(pthread_t *visitor_tid){
-    for(int i = 0; i < n; i++){
-        int *arg = (int *) malloc(sizeof(int));
-        *arg = i+1; // visitor id 1 indexed
-        if(pthread_create(&visitor_tid[i], NULL, visitor_thread, (void *) arg) != 0){
+void create_visitors(pthread_t *visitor_tid) {
+    for (int i = 0; i < n; i++) {
+        int *arg = malloc(sizeof(int));
+        *arg = i+1; // visitor id start at 1
+        if (pthread_create(&visitor_tid[i], NULL, visitor_thread, arg) != 0) {
             perror("Failed to create visitor thread");
             exit(EXIT_FAILURE);
         }
     }
 }
 
-
-int main(int argc, char *argv[]){
-    if(argc != 3){
-        fprintf(stderr, "Usage: %s <no. of boats[5, 10]> <no. of visitors[20, 100]>\n", argv[0]);
+int main(int argc, char *argv[]) {
+    if (argc != 3) {
+        fprintf(stderr, "Usage: %s m n\n", argv[0]);
         exit(EXIT_FAILURE);
     }
-
     m = atoi(argv[1]);
-    n = vis_left = atoi(argv[2]);
-
-    // check m, n ranges
-    if(m < 5 || m > 10 || n < 20 || n > 100){
+    n = atoi(argv[2]);
+    if (m < 5 || m > 10 || n < 20 || n > 100) {
         fprintf(stderr, "Invalid values: m should be between 5 and 10, n between 20 and 100\n");
         exit(EXIT_FAILURE);
     }
 
-    srand((unsigned int)time(NULL));
+    srand(time(NULL));
 
-    // allocate and init shared memory arrays (BA, BC, BT)
-    init_arrays();
+    // Allocate shared arrays.
+    BA = malloc(m * sizeof(int));
+    BC = malloc(m * sizeof(int));
+    BT = malloc(m * sizeof(int));
+    BB = malloc(m * sizeof(pthread_barrier_t));
 
-    BB = (pthread_barrier_t *) malloc(m * sizeof(pthread_barrier_t)); // init in boat_thread
-    
-    // create boat threads
-    pthread_t boat_tid[m];
+    for (int i = 0; i < m; i++) {
+        BA[i] = 0;    
+        BT[i] = 0;
+        BC[i] = -1;
+    }
+
+    // Create boat threads.
+    pthread_t *boat_tid = malloc(m * sizeof(pthread_t));
     create_boats(boat_tid);
 
-    // create visitor threads
-    pthread_t visitor_tid[n];
+    // Create visitor threads.
+    pthread_t *visitor_tid = malloc(n * sizeof(pthread_t));
     create_visitors(visitor_tid);
 
-    // wait for all visitors to leave
-    for(int i = 0; i < n; i++){
-        if(pthread_join(visitor_tid[i], NULL) != 0){
-            perror("Failed to join visitor thread");
-            exit(EXIT_FAILURE);
-        }
+    // Wait for all visitor 
+    for (int i = 0; i < n; i++) {
+        pthread_join(visitor_tid[i], NULL);
     }
 
-    // wait for all boats to finish
-    for(int i = 0; i < m; i++){
-        if(pthread_join(boat_tid[i], NULL) != 0){
-            perror("Failed to join boat thread");
-            exit(EXIT_FAILURE);
-        }
+    for (int i = 0; i < m; i++) {
+        pthread_join(boat_tid[i], NULL);
     }
 
-    // free memory
+    // Cleanup.
     free(BA);
     free(BC);
     free(BT);
     free(BB);
+    free(boat_tid);
+    free(visitor_tid);
 
-    exit(EXIT_SUCCESS);
+    return 0;
 }
