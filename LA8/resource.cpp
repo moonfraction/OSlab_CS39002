@@ -45,8 +45,8 @@ Request *g_request;
 
 // function prototypes
 void process_pending_requests(std::queue<local_request> &Q, int m, int n, int **ALLOC, int **NEED, int *AVAILABLE, bool *active_threads);
-bool can_fulfill_req(int *request, int **NEED, int *AVAILABLE, int **ALLOC, int n, int m, bool* active_threads, int thread_id);
-bool is_safe_state(int *AVAILABLE, int **ALLOC, int **NEED, int m, int n, bool *active_threads);
+bool can_fulfill_req(local_request lr, int m, int n, int **ALLOC, int **NEED, int *AVAILABLE, bool *active_threads);
+bool is_safe_state(int m, int n, int ** ALLOC, int ** NEED, int * AVAILABLE, bool * active_threads);
 void printQ(std::queue<local_request> &Q);
 
 
@@ -173,13 +173,11 @@ int main(){
             pthread_mutex_lock(&pmtx);
             printf("Master thread releases resources of thread %d\n", thread_id);
             fflush(stdout);
-            pthread_mutex_unlock(&pmtx);
 
-            // Acknowledge receipt of request
-            pthread_barrier_wait(&ACKB[thread_id]);
-
+            // print waiting threads
+            printQ(Q);
+            
             // print active threads
-            pthread_mutex_lock(&pmtx);
             printf("%d threads left: ", n - terminated_threads);
             for(int i = 0; i < n; i++){
                 if(active_threads[i]){
@@ -188,7 +186,7 @@ int main(){
             }
             printf("\n");
             fflush(stdout);
-
+            
             // print available resources
             printf("Available resources: ");
             for(int i = 0; i < m; i++){
@@ -197,10 +195,6 @@ int main(){
             printf("\n");
             fflush(stdout);
             pthread_mutex_unlock(&pmtx);
-
-            process_pending_requests(Q, m, n, ALLOC, NEED, AVAILABLE, active_threads);
-
-            continue;
         }
         else if(request_type == 1){ // ADDITIONAL
             // handle release components first
@@ -212,11 +206,7 @@ int main(){
                     request[i] = 0;
                 }
             }
-
-            // Acknowledge receipt of request
-            pthread_barrier_wait(&ACKB[thread_id]);
             
-
             // enqueue the request
             local_request lr;
             lr.thread_id = thread_id;
@@ -236,9 +226,10 @@ int main(){
                     NEED[thread_id][i] -= request[i];
                 }
             }
-            // Acknowledge receipt of request
-            pthread_barrier_wait(&ACKB[thread_id]);
         }
+
+        // ack the request after local storage
+        pthread_barrier_wait(&ACKB[thread_id]);
 
         // process pending requests
         process_pending_requests(Q, m, n, ALLOC, NEED, AVAILABLE, active_threads);
@@ -319,6 +310,12 @@ void *user_thread(void *arg){
         int delay;
         int request[MAX_RESOURCES] = {0};
 
+        // // print line 
+        // pthread_mutex_lock(&pmtx);
+        // printf("    Thread %d: Processing request line: %s", tid, line);
+        // fflush(stdout);
+        // pthread_mutex_unlock(&pmtx);
+
         char *token = strtok(line, " \t\n");
         if(!token) continue;
 
@@ -340,6 +337,11 @@ void *user_thread(void *arg){
             pthread_barrier_wait(&REQB);
             pthread_barrier_wait(&ACKB[tid]);
 
+            pthread_mutex_lock(&pmtx);
+            printf("    Thread %d going to quit\n", tid);
+            fflush(stdout);
+            pthread_mutex_unlock(&pmtx);
+
             pthread_mutex_unlock(&rmtx);
             break;
         }
@@ -353,16 +355,16 @@ void *user_thread(void *arg){
                 }
             }
 
-            // print request
-            pthread_mutex_lock(&pmtx);
-            printf("    Thread %d: Waiting for %d ms before request\n", tid, delay);
-            printf("    Thread %d: Requesting [ ", tid);
-            for(int i = 0; i < ri; i++){
-                printf("%d ", request[i]);
-            }
-            printf("]\n");
-            fflush(stdout);
-            pthread_mutex_unlock(&pmtx);
+            // // print request
+            // pthread_mutex_lock(&pmtx);
+            // printf("    Thread %d: Waiting for %d ms before request\n", tid, delay);
+            // printf("    Thread %d: Requesting [ ", tid);
+            // for(int i = 0; i < ri; i++){
+            //     printf("%d ", request[i]);
+            // }
+            // printf("]\n");
+            // fflush(stdout);
+            // pthread_mutex_unlock(&pmtx);
 
             // wait for specified delay to send this request
             usleep(delay * 1000); // convert to microseconds
@@ -377,16 +379,16 @@ void *user_thread(void *arg){
             for(int i = 0; i < ri; i++){
                 g_request->request[i] = request[i];
             }
-
-            pthread_barrier_wait(&REQB);
-            pthread_barrier_wait(&ACKB[tid]);
-
-            pthread_mutex_unlock(&rmtx);
-
+            
             pthread_mutex_lock(&pmtx);
             printf("    Thread %d sends resource request: type = %s\n", tid, is_add ? "ADDITIONAL" : "RELEASE");
             fflush(stdout);
             pthread_mutex_unlock(&pmtx);
+
+            pthread_barrier_wait(&REQB); // inform master
+            pthread_barrier_wait(&ACKB[tid]); // wait for master to acknowledge
+
+            pthread_mutex_unlock(&rmtx); // release resource mutex
 
             // if request is ADDITIONAL, wait for it to be granted
             if(is_add){
@@ -395,7 +397,7 @@ void *user_thread(void *arg){
                 pthread_cond_wait(&cv[tid], &cmtx[tid]);
 
                 pthread_mutex_lock(&pmtx);
-                printf("    Thread %dis granted its last resource request\n", tid);
+                printf("    Thread %d is granted its last resource request\n", tid);
                 fflush(stdout);
                 pthread_mutex_unlock(&pmtx);
 
@@ -409,11 +411,6 @@ void *user_thread(void *arg){
             }
         }
     }
-
-    pthread_mutex_lock(&pmtx);
-    printf("    Thread %d going to quit\n", tid);
-    fflush(stdout);
-    pthread_mutex_unlock(&pmtx);
 
     fclose(thread_file);
 
@@ -429,10 +426,11 @@ void printQ(std::queue<local_request> &Q){
         printf("%d ", lr.thread_id);
     }
     printf("\n");
+    fflush(stdout);
 }
 
 void process_pending_requests(std::queue<local_request> &Q, int m, int n, int **ALLOC, int **NEED, int *AVAILABLE, bool *active_threads) {
-    std::queue<local_request> temp_queue;
+    std::queue<local_request> temp_queue, fulfilled_queue;
 
     pthread_mutex_lock(&pmtx);
     printQ(Q);    
@@ -453,7 +451,7 @@ void process_pending_requests(std::queue<local_request> &Q, int m, int n, int **
             continue;
         }
 
-        if(can_fulfill_req(request, NEED, AVAILABLE, ALLOC, n, m, active_threads, thread_id)){
+        if(can_fulfill_req(lr, m, n, ALLOC, NEED, AVAILABLE, active_threads)){
             // grant request
             for(int i = 0; i < m; i++){
                 AVAILABLE[i] -= request[i];
@@ -466,19 +464,25 @@ void process_pending_requests(std::queue<local_request> &Q, int m, int n, int **
             fflush(stdout);
             pthread_mutex_unlock(&pmtx);
 
-            // signal the thread
-            pthread_mutex_lock(&cmtx[thread_id]);
-            pthread_cond_signal(&cv[thread_id]);
-            pthread_mutex_unlock(&cmtx[thread_id]);
+            // store in fulfilled queue
+            fulfilled_queue.push(lr);
         }
         else{
             // cannot fulfill request, put it back in the queue
             temp_queue.push(lr);
-            pthread_mutex_lock(&pmtx);
-            printf("    +++ Insufficient resources to grant request of thread %d\n", thread_id);
-            fflush(stdout);
-            pthread_mutex_unlock(&pmtx);
         }
+    }
+
+    // send cond signal to threads whose requests are granted
+    while(!fulfilled_queue.empty()){
+        local_request lr = fulfilled_queue.front();
+        fulfilled_queue.pop();
+
+        int thread_id = lr.thread_id;
+
+        pthread_mutex_lock(&cmtx[thread_id]);
+        pthread_cond_signal(&cv[thread_id]);
+        pthread_mutex_unlock(&cmtx[thread_id]);
     }
 
     // put back pending requests
@@ -488,8 +492,9 @@ void process_pending_requests(std::queue<local_request> &Q, int m, int n, int **
     fflush(stdout);
     pthread_mutex_unlock(&pmtx);
 }
+
 // Check if the system is in a safe state
-bool is_safe_state(int *AVAILABLE, int **ALLOC, int **NEED, int m, int n, bool *active_threads) {
+bool is_safe_state(int m, int n, int ** ALLOC, int ** NEED, int * AVAILABLE, bool * active_threads) {
     // Work array and finished array
     int work[m];
     bool finish[n];
@@ -501,7 +506,7 @@ bool is_safe_state(int *AVAILABLE, int **ALLOC, int **NEED, int m, int n, bool *
     
     // Initialize finish array
     for (int i = 0; i < n; i++) {
-        finish[i] = active_threads[i] == 0; // Inactive threads are already "finished"
+        finish[i] = (active_threads[i] == 0); // Inactive threads are already "finished"
     }
     
     // Find an unfinished thread that can complete
@@ -541,10 +546,16 @@ bool is_safe_state(int *AVAILABLE, int **ALLOC, int **NEED, int m, int n, bool *
     return true;
 }
 
-bool can_fulfill_req(int *request, int **NEED, int *AVAILABLE, int **ALLOC, int n, int m, bool* active_threads, int thread_id){
+bool can_fulfill_req(local_request lr, int m, int n, int **ALLOC, int **NEED, int *AVAILABLE, bool *active_threads){
+    int thread_id = lr.thread_id;
+    int *request = lr.req;
     // First check if request exceeds need or available
     for(int i = 0; i < m; i++){
         if(request[i] > NEED[thread_id][i] || request[i] > AVAILABLE[i]){
+            pthread_mutex_lock(&pmtx);
+            printf("    +++ Insufficient resources to grant request of thread %d\n", thread_id);
+            fflush(stdout);
+            pthread_mutex_unlock(&pmtx);
             return false;
         }
     }
@@ -572,14 +583,13 @@ bool can_fulfill_req(int *request, int **NEED, int *AVAILABLE, int **ALLOC, int 
     }
     
     // Apply the request to the temporary state
-    int tid = g_request->thread_id;
     for (int i = 0; i < m; i++) {
-        temp_alloc[tid][i] += request[i];
-        temp_need[tid][i] -= request[i];
+        temp_alloc[thread_id][i] += request[i];
+        temp_need[thread_id][i] -= request[i];
     }
     
     // Check if resulting state is safe
-    bool is_safe = is_safe_state(temp_available, temp_alloc, temp_need, m, n, active_threads);
+    bool is_safe = is_safe_state(m, n, temp_alloc, temp_need, temp_available, active_threads);
     
     // Free temporary arrays
     for (int i = 0; i < n; i++) {
@@ -588,6 +598,13 @@ bool can_fulfill_req(int *request, int **NEED, int *AVAILABLE, int **ALLOC, int 
     }
     free(temp_alloc);
     free(temp_need);
+
+    if(!is_safe){
+        pthread_mutex_lock(&pmtx);
+        printf("+++ Unsafe to grant request of thread %d\n", thread_id);
+        fflush(stdout);
+        pthread_mutex_unlock(&pmtx);
+    }
     
     return is_safe;
 #else
