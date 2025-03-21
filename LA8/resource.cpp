@@ -71,6 +71,16 @@ int main(){
     }
     fclose(system_file);
 
+    // print available resources
+    pthread_mutex_lock(&pmtx);
+    printf("Available resources: ");
+    for(int i = 0; i < m; i++){
+        printf("%d ", AVAILABLE[i]);
+    }
+    printf("\n");
+    fflush(stdout);
+    pthread_mutex_unlock(&pmtx);
+
     // Initialize matrices
     int ** ALLOC = (int **)malloc(n * sizeof(int *));
     int ** MAX_NEED = (int **)malloc(n * sizeof(int *));
@@ -135,10 +145,10 @@ int main(){
     // Wait for all threads to be ready
     pthread_barrier_wait(&BOS);
 
-    pthread_mutex_lock(&pmtx);
+    // pthread_mutex_lock(&pmtx);
     // printf("==> Master: All threads ready, simulation starting\n");
-    fflush(stdout);
-    pthread_mutex_unlock(&pmtx);
+    // fflush(stdout);
+    // pthread_mutex_unlock(&pmtx);
 
     int terminated_threads = 0;
     bool active_threads[n];
@@ -154,7 +164,27 @@ int main(){
         // process req
         int thread_id = g_request->thread_id;
         int request_type = g_request->type;
-        int *request = g_request->request;
+        int *request = (int *)malloc(MAX_RESOURCES * sizeof(int));
+        for(int i = 0; i < m; i++){
+            request[i] = g_request->request[i];
+        }
+
+    
+        // print global request
+        pthread_mutex_lock(&pmtx);
+        printf("g_request in master: type = %d, thread_id = %d, request = [ ", g_request->type, g_request->thread_id);
+        for(int i = 0; i < m; i++){
+            printf("%d ", g_request->request[i]);
+        }
+        printf("]\n");
+        fflush(stdout);
+        pthread_mutex_unlock(&pmtx);
+
+        // free g_request
+        if(g_request->request){
+            free(g_request->request);
+        }
+        free(g_request);
 
         // // Acknowledge receipt of request
         // pthread_barrier_wait(&ACKB[thread_id]);
@@ -308,13 +338,6 @@ void *user_thread(void *arg){
     while(fgets(line, sizeof(line), thread_file)){
         // parse request line
         int delay;
-        int request[MAX_RESOURCES] = {0};
-
-        // // print line 
-        // pthread_mutex_lock(&pmtx);
-        // printf("    Thread %d: Processing request line: %s", tid, line);
-        // fflush(stdout);
-        // pthread_mutex_unlock(&pmtx);
 
         char *token = strtok(line, " \t\n");
         if(!token) continue;
@@ -348,6 +371,7 @@ void *user_thread(void *arg){
         else{ // request
             int ri = 0; // request index
             bool is_add = false;
+            int *request = (int *)malloc(MAX_RESOURCES * sizeof(int));
             while((token = strtok(NULL, " \t\n"))){
                 request[ri++] = atoi(token);
                 if(atoi(token) > 0){
@@ -355,30 +379,44 @@ void *user_thread(void *arg){
                 }
             }
 
-            // // print request
-            // pthread_mutex_lock(&pmtx);
-            // printf("    Thread %d: Waiting for %d ms before request\n", tid, delay);
-            // printf("    Thread %d: Requesting [ ", tid);
-            // for(int i = 0; i < ri; i++){
-            //     printf("%d ", request[i]);
-            // }
-            // printf("]\n");
-            // fflush(stdout);
-            // pthread_mutex_unlock(&pmtx);
-
+            
             // wait for specified delay to send this request
             usleep(delay * 1000); // convert to microseconds
 
+            // print request
+            pthread_mutex_lock(&pmtx);
+            printf("    Thread %d: Waited for %d ms before request\n", tid, delay);
+            printf("    Thread %d: Requesting [ ", tid);
+            for(int i = 0; i < ri; i++){
+                printf("%d ", request[i]);
+            }
+            printf("]\n");
+            fflush(stdout);
+            pthread_mutex_unlock(&pmtx);
+            
             // send the request -> store in global request
             pthread_mutex_lock(&rmtx);
 
             g_request = (Request *)malloc(sizeof(Request));
             g_request->type = is_add ? 1 : 0; // 1 for ADDITIONAL, 0 for RELEASE
             g_request->thread_id = tid;
-            g_request->request = (int *)malloc(ri * sizeof(int));
+            g_request->request = (int *)malloc(MAX_RESOURCES * sizeof(int));
             for(int i = 0; i < ri; i++){
                 g_request->request[i] = request[i];
             }
+            
+            // print global request
+            pthread_mutex_lock(&pmtx);
+            printf("g_request in user: type = %d, thread_id = %d, request = [ ", g_request->type, g_request->thread_id);
+            for(int i = 0; i < ri; i++){
+                printf("%d ", g_request->request[i]);
+            }
+            printf("]\n");
+            fflush(stdout);
+            pthread_mutex_unlock(&pmtx);
+            
+            // free local request
+            free(request);
             
             pthread_mutex_lock(&pmtx);
             printf("    Thread %d sends resource request: type = %s\n", tid, is_add ? "ADDITIONAL" : "RELEASE");
@@ -553,6 +591,23 @@ bool can_fulfill_req(local_request lr, int m, int n, int **ALLOC, int **NEED, in
     for(int i = 0; i < m; i++){
         if(request[i] > NEED[thread_id][i] || request[i] > AVAILABLE[i]){
             pthread_mutex_lock(&pmtx);
+            
+            printf("    Available resources: [ ");
+            for(int i = 0; i < m; i++){
+                printf("%d ", AVAILABLE[i]);
+            }
+            printf("]\n");
+            printf("    Requested resources: [ ");
+            for(int i = 0; i < m; i++){
+                printf("%d ", request[i]);
+            }
+            printf("]\n");
+            printf("    Need resources: [ ");
+            for(int i = 0; i < m; i++){
+                printf("%d ", NEED[thread_id][i]);
+            }
+            printf("]\n");
+
             printf("    +++ Insufficient resources to grant request of thread %d\n", thread_id);
             fflush(stdout);
             pthread_mutex_unlock(&pmtx);
