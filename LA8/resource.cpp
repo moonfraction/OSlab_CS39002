@@ -44,8 +44,8 @@ typedef struct{
 Request *g_request;
 
 // function prototypes
-void process_pending_requests(std::queue<local_request> &Q, int m, int n, int **ALLOC, int **NEED, int *AVAILABLE);
-bool can_fulfill_req(int *request, int *NEED, int *AVAILABLE, int m);
+void process_pending_requests(std::queue<local_request> &Q, int m, int n, int **ALLOC, int **NEED, int *AVAILABLE, int *active_threads);
+bool can_fulfill_req(int *request, int **NEED, int *AVAILABLE, int **ALLOC, int n, int m, int* active_threads, int thread_id);
 bool is_safe_state(int *AVAILABLE, int **ALLOC, int **NEED, int m, int n, int *active_threads);
 void printQ(std::queue<local_request> &Q);
 
@@ -80,7 +80,10 @@ int main(){
         MAX_NEED[i] = (int *)malloc(m * sizeof(int));
         NEED[i] = (int *)malloc(m * sizeof(int));
     }
-    memset(ALLOC, 0, sizeof(ALLOC));
+    // Initialize ALLOC matrix to zero
+    for (int i = 0; i < n; i++) {
+        memset(ALLOC[i], 0, m * sizeof(int));
+    }
 
     // Read thread files to initialize MAX_NEED and NEED matrices
     for (int i = 0; i < n; i++) {
@@ -197,7 +200,7 @@ int main(){
             fflush(stdout);
             pthread_mutex_unlock(&pmtx);
 
-            process_pending_requests(Q, m, n, ALLOC, NEED, AVAILABLE);
+            process_pending_requests(Q, m, n, ALLOC, NEED, AVAILABLE, active_threads);
 
             continue;
         }
@@ -240,7 +243,7 @@ int main(){
         }
 
         // process pending requests
-        process_pending_requests(Q, m, n, ALLOC, NEED, AVAILABLE);
+        process_pending_requests(Q, m, n, ALLOC, NEED, AVAILABLE, active_threads);
     }
 
     /********************** master work end **********************/
@@ -305,7 +308,7 @@ void *user_thread(void *arg){
     // process each request from the thread file
     while(fgets(line, sizeof(line), thread_file)){
         // parse request line
-        int delay, r;
+        int delay;
         int request[MAX_RESOURCES] = {0};
 
         char *token = strtok(line, " \t\n");
@@ -433,7 +436,7 @@ void process_pending_requests(std::queue<local_request> &Q, int m, int n, int **
             continue;
         }
 
-        if(can_fulfill_req(request, NEED[thread_id], AVAILABLE, m)){
+        if(can_fulfill_req(request, NEED, AVAILABLE, ALLOC, n, m, active_threads, thread_id)){
             // grant request
             for(int i = 0; i < m; i++){
                 AVAILABLE[i] -= request[i];
@@ -521,10 +524,10 @@ bool is_safe_state(int *AVAILABLE, int **ALLOC, int **NEED, int m, int n, int *a
     return true;
 }
 
-bool can_fulfill_req(int *request, int *NEED, int *AVAILABLE, int m) {
+bool can_fulfill_req(int *request, int **NEED, int *AVAILABLE, int **ALLOC, int n, int m, int* active_threads, int thread_id){
     // First check if request exceeds need or available
     for(int i = 0; i < m; i++){
-        if(request[i] > NEED[i] || request[i] > AVAILABLE[i]){
+        if(request[i] > NEED[thread_id][i] || request[i] > AVAILABLE[i]){
             return false;
         }
     }
@@ -552,10 +555,10 @@ bool can_fulfill_req(int *request, int *NEED, int *AVAILABLE, int m) {
     }
     
     // Apply the request to the temporary state
-    int thread_id = g_request->thread_id;
+    int tid = g_request->thread_id;
     for (int i = 0; i < m; i++) {
-        temp_alloc[thread_id][i] += request[i];
-        temp_need[thread_id][i] -= request[i];
+        temp_alloc[tid][i] += request[i];
+        temp_need[tid][i] -= request[i];
     }
     
     // Check if resulting state is safe
