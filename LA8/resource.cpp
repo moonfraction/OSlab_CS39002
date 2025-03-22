@@ -337,7 +337,7 @@ void *user_thread(void *arg){
         if(!token) continue;
 
         if(strcmp(token, "Q") == 0){ // QUIT
-            usleep(delay * 1000); // convert to microseconds
+            usleep(delay * 50000); // convert to microseconds
 
             pthread_mutex_lock(&rmtx);
 
@@ -376,7 +376,7 @@ void *user_thread(void *arg){
             }
 
             // Wait for specified delay to send this request
-            usleep(delay * 1000); // convert to microseconds
+            usleep(delay * 50000); // convert to microseconds
             
             // Send the request -> store in global request
             pthread_mutex_lock(&rmtx);
