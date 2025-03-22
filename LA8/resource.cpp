@@ -317,12 +317,16 @@ void *user_thread(void *arg){
     char filename[30];
     sprintf(filename, "input/thread%02d.txt", tid);
     FILE *thread_file = fopen(filename, "r");
+
     if(!thread_file){
         perror("Error opening thread file");
         return NULL;
     }
 
     // skip the max needs line-> already read in main
+    // wait for all threads to be ready
+    pthread_barrier_wait(&BOS);
+
     char line[100];
     fgets(line, sizeof(line), thread_file);
     
@@ -331,8 +335,6 @@ void *user_thread(void *arg){
     fflush(stdout);
     pthread_mutex_unlock(&pmtx);
 
-    // wait for all threads to be ready
-    pthread_barrier_wait(&BOS);
     
     /****** process each request from the thread file ******/
     while(fgets(line, sizeof(line), thread_file)){
@@ -517,6 +519,11 @@ void process_pending_requests(std::queue<local_request> &Q, int m, int n, int **
         fulfilled_queue.pop();
 
         int thread_id = lr.thread_id;
+        int *request = lr.req;
+        // free request
+        if(request){
+            free(request);
+        }
 
         pthread_mutex_lock(&cmtx[thread_id]);
         pthread_cond_signal(&cv[thread_id]);
