@@ -71,16 +71,6 @@ int main(){
     }
     fclose(system_file);
 
-    // print available resources
-    // pthread_mutex_lock(&pmtx);
-    // printf("Available resources: ");
-    // for(int i = 0; i < m; i++){
-    //     printf("%d ", AVAILABLE[i]);
-    // }
-    // printf("\n");
-    // fflush(stdout);
-    // pthread_mutex_unlock(&pmtx);
-
     // Initialize matrices
     int ** ALLOC = (int **)malloc(n * sizeof(int *));
     int ** MAX_NEED = (int **)malloc(n * sizeof(int *));
@@ -145,11 +135,6 @@ int main(){
     // Wait for all threads to be ready
     pthread_barrier_wait(&BOS);
 
-    // pthread_mutex_lock(&pmtx);
-    // printf("==> Master: All threads ready, simulation starting\n");
-    // fflush(stdout);
-    // pthread_mutex_unlock(&pmtx);
-
     int terminated_threads = 0;
     bool active_threads[n];
     for(int i = 0; i < n; i++){
@@ -157,7 +142,7 @@ int main(){
     }
 
     /****** Main processing loop ******/
-    while(terminated_threads < n){
+    while(1){
         // wait for a req
         pthread_barrier_wait(&REQB);
 
@@ -175,11 +160,12 @@ int main(){
                 free(g_request->request);
             }
             free(g_request);
+
+            // Acknowledge receipt of request
+            pthread_barrier_wait(&ACKB[thread_id]);
         }
         
 
-        // Acknowledge receipt of request
-        pthread_barrier_wait(&ACKB[thread_id]);
 
         if(request_type == 2){ // QUIT
             // release all resources held by the thread
@@ -217,6 +203,10 @@ int main(){
             printf("\n");
             fflush(stdout);
             pthread_mutex_unlock(&pmtx);
+
+            // send ack
+            pthread_barrier_wait(&ACKB[thread_id]);
+
         }
         else if(request_type == 1){ // ADDITIONAL
             // handle release components first
@@ -250,6 +240,10 @@ int main(){
             }
         }
 
+        if(terminated_threads == n){
+            break;
+        }
+
         // process pending requests
         process_pending_requests(Q, m, n, ALLOC, NEED, AVAILABLE, active_threads);
     }
@@ -258,17 +252,7 @@ int main(){
 
     // Wait for thread to complete
     for(int i = 0; i < n; i++){
-        // pthread_mutex_lock(&pmtx);
-        // printf("==> Master: Waiting for thread %d to terminate\n", i);
-        // fflush(stdout);
-        // pthread_mutex_unlock(&pmtx);
-
         pthread_join(users[i], NULL);
-
-        // pthread_mutex_lock(&pmtx);
-        // printf("==> Master: Thread %d terminated\n", i);
-        // fflush(stdout);
-        // pthread_mutex_unlock(&pmtx);
         
     }
 
@@ -363,11 +347,6 @@ void *user_thread(void *arg){
             g_request->request = NULL;
 
             pthread_barrier_wait(&REQB);
-            
-            pthread_mutex_lock(&pmtx);
-            printf("    Thread %d sends QUIT request\n", tid);
-            fflush(stdout);
-            pthread_mutex_unlock(&pmtx);
 
             pthread_barrier_wait(&ACKB[tid]);
 
@@ -601,22 +580,6 @@ bool can_fulfill_req(local_request lr, int m, int n, int **ALLOC, int **NEED, in
         if(request[i] > NEED[thread_id][i] || request[i] > AVAILABLE[i]){
             pthread_mutex_lock(&pmtx);
             
-            // printf("    Available resources: [ ");
-            // for(int i = 0; i < m; i++){
-            //     printf("%d ", AVAILABLE[i]);
-            // }
-            // printf("]\n");
-            // printf("    Requested resources: [ ");
-            // for(int i = 0; i < m; i++){
-            //     printf("%d ", request[i]);
-            // }
-            // printf("]\n");
-            // printf("    Need resources: [ ");
-            // for(int i = 0; i < m; i++){
-            //     printf("%d ", NEED[thread_id][i]);
-            // }
-            // printf("]\n");
-
             printf("    +++ Insufficient resources to grant request of thread %d\n", thread_id);
             fflush(stdout);
             pthread_mutex_unlock(&pmtx);
