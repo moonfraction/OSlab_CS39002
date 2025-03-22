@@ -400,6 +400,8 @@ void *user_thread(void *arg){
             // Free local request
             free(request);
 
+            if(is_add) pthread_mutex_lock(&cmtx[tid]);
+
             pthread_barrier_wait(&REQB); // Inform master
 
             pthread_mutex_lock(&pmtx);
@@ -413,7 +415,6 @@ void *user_thread(void *arg){
 
             // If request is ADDITIONAL, wait for it to be granted
             if(is_add){
-                pthread_mutex_lock(&cmtx[tid]);
                 pthread_cond_wait(&cv[tid], &cmtx[tid]);
 
                 pthread_mutex_lock(&pmtx);
