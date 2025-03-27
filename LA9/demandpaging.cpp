@@ -171,6 +171,11 @@ bool swapIn(Process *proc) {
     return true;
 }
 
+void terminateProcess(Process *proc) {
+    freeProcessFrames(proc);
+    activeProcesses--;
+}
+
 bool swapInNextProcess() {
     if (swappedQ.empty()) {
         return false; // No processes to swap in
@@ -178,19 +183,43 @@ bool swapInNextProcess() {
     
     int pidToSwap = swappedQ.front();
     swappedQ.pop();
-    if (!swapIn(processes[pidToSwap])) {
+    Process* proc = processes[pidToSwap];
+    
+    if (!swapIn(proc)) {
         cerr << "Error during swap-in." << endl;
         return false;
     }
     activeProcesses++;
-    readyQ.push(pidToSwap);
+    
+    // Immediately perform a search after swapping in
+    int key = proc->keys[proc->currentSearch];
+    
+    #ifdef VERBOSE
+    printf("\tSearch %d by Process %d\n", proc->currentSearch+1, proc->pid);
+    #endif
+    
+    bool success = simulateBinarySearch(proc, key);
+    
+    if (!success) {
+        // This is rare but possible if we run out of frames again
+        swapOut(proc);
+    } else {
+        // Search completed successfully
+        proc->currentSearch++;
+        
+        // Check if process has more searches
+        if (proc->currentSearch < proc->m) {
+            readyQ.push(proc->pid); // Requeue for more searches
+        } else {
+            // Process finished all searches
+            terminateProcess(proc);
+            return swapInNextProcess(); // Try to swap in another one
+        }
+    }
+    
     return true;
 }
 
-void terminateProcess(Process *proc) {
-    freeProcessFrames(proc);
-    activeProcesses--;
-}
 
 int main() {
     // initially all frames are free
