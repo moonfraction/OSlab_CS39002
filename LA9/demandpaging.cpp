@@ -153,7 +153,7 @@ void swapOut(Process *proc) {
     if (activeProcesses < minActiveProcesses)
         minActiveProcesses = activeProcesses;
     // Print swap-out message (non-verbose mode prints only swap messages)
-    printf("+++ Swapping out process %4d [ %d active processes]\n", proc->pid, activeProcesses);
+    printf("+++ Swapping out process %4d [%d active processes]\n", proc->pid, activeProcesses);
     swappedQ.push(proc->pid);
 }
 
@@ -166,7 +166,7 @@ bool swapIn(Process *proc) {
         // This should not happen if frames were freed properly.
         return false;
     }
-    printf("+++ Swapping in process %4d [ %d active processes]\n", proc->pid, activeProcesses+1);
+    printf("+++ Swapping in process %4d [%d active processes]\n", proc->pid, activeProcesses+1);
 
     return true;
 }
@@ -250,9 +250,9 @@ int main() {
     printf("+++ Simulation data read from file\n");
     printf("+++ Kernel data initialized\n");
 
-#ifdef VERBOSE
-    printf("--> Running in VERBOSE mode\n");
-#endif
+// #ifdef VERBOSE
+//     printf("--> Running in VERBOSE mode\n");
+// #endif
 
     int completedCount = 0;
     
@@ -269,7 +269,7 @@ int main() {
         Process *proc = processes[pid];
 
 #ifdef VERBOSE
-        printf("\t Search %d by Process %d\n", proc->currentSearch, pid);
+        printf("\tSearch %d by Process %d\n", proc->currentSearch+1, pid);
 #endif
 
         // If the process has finished all its searches, terminate it
@@ -308,10 +308,10 @@ int main() {
 
     // Print final statistics.
     cout << "+++ Page access summary" << endl;
-    cout << "Total number of page accesses = " << pageAccesses << endl;
-    cout << "Total number of page faults = " << pageFaults << endl;
-    cout << "Total number of swaps = " << swapCount << endl;
-    cout << "Degree of multiprogramming = " << minActiveProcesses << endl;
+    cout << "\tTotal number of page accesses = " << pageAccesses << endl;
+    cout << "\tTotal number of page faults = " << pageFaults << endl;
+    cout << "\tTotal number of swaps = " << swapCount << endl;
+    cout << "\tDegree of multiprogramming = " << minActiveProcesses << endl;
 
     // Cleanup: free all process objects.
     for (int i = 0; i < totalProcesses; i++) {
