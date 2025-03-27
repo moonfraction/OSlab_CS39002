@@ -37,15 +37,23 @@ struct Process {
     int pid;                                        // process id
     int s;                                          // size of array A (number of integers)
     int m;                                          // number of searches to perform
-    vector<int> keys;                               // search keys (each search key is an index in A)
+    int *keys;                                  // search keys (each search key is an index in A)
     int currentSearch;                              // index of next search to perform
-    vector<uint16_t> pt;                            // page table of size PAGE_TABLE_ENTRIES (each entry is 16-bit)
-    
-    // Constructor initializes page table to 0 and currentSearch to 0.
-    Process(int id, int size, int searches) : pid(id), s(size), m(searches), currentSearch(0) {
-        pt.assign(PAGE_TABLE_ENTRIES, 0);
-    }
+    uint16_t *pt;                            // page table of size PAGE_TABLE_ENTRIES (each entry is 16-bit)
 };
+
+void initproc(Process *proc, int id, int size, int searches) {
+    proc->pid = id;
+    proc->s = size;
+    proc->m = searches;
+    proc->currentSearch = 0;
+    proc->keys = (int *)malloc(searches * sizeof(int));
+    proc->pt = (uint16_t *)malloc(PAGE_TABLE_ENTRIES * sizeof(uint16_t));
+    if (proc->keys == NULL || proc->pt == NULL) {
+        fprintf(stderr, "Error: Memory allocation failed\n");
+        exit(1);
+    }
+}
 
 // Global kernel data
 queue<int> readyQ;                                  // holds process ids of active processes (round robin)
@@ -162,50 +170,53 @@ bool swapIn(Process *proc) {
     return true;
 }
 
-//
-// MAIN SIMULATION
-//
 int main() {
-    ios::sync_with_stdio(false);
-    // Initialize freeFrames list with USER_FRAMES available.
-    // For simplicity, we use frame numbers 0 to USER_FRAMES-1.
+    // initially all frames are free
     for (int i = 0; i < USER_FRAMES; i++) {
         freeFrames.push_back(i);
     }
 
-    // Read input from "search.txt"
-    ifstream fin("search.txt");
+    // Read input from search.txt
+    FILE *fin = fopen("search.txt", "r");
     if (!fin) {
-        cerr << "Error: Cannot open input file 'search.txt'" << endl;
+        perror("search.txt");
         return 1;
     }
-    fin >> totalProcesses >> searchesPerProcess;
-    
-    // Create processes and initialize their page tables.
+
+    fscanf(fin, "%d %d", &totalProcesses, &searchesPerProcess);
+
+    // Creating processes and initializing their page tables
     processes.resize(totalProcesses, nullptr);
     for (int i = 0; i < totalProcesses; i++) {
         int s;
-        fin >> s;
-        Process *proc = new Process(i, s, searchesPerProcess);
-        // Read m search keys.
+        fscanf(fin, "%d", &s);
+        Process *proc = (Process *)malloc(sizeof(Process));
+        if (proc == NULL) {
+            fprintf(stderr, "Error: Memory allocation failed\n");
+            exit(1);
+        }
+        initproc(proc, i, s, searchesPerProcess);
+        
+        // Read m search keys
         for (int j = 0; j < searchesPerProcess; j++) {
             int key;
-            fin >> key;
-            proc->keys.push_back(key);
+            fscanf(fin, "%d", &key);
+            proc->keys[j] = key;
         }
+        
         // Allocate essential pages (pages 0 to ESSENTIAL_PAGES-1)
         if (!allocateEssentialPages(proc)) {
-            cerr << "Error: Not enough free frames to allocate essential pages for process " << i << endl;
+            fprintf(stderr, "Error: Not enough free frames to allocate essential pages for process %d\n", i);
             return 1;
         }
         processes[i] = proc;
         readyQ.push(i);
         activeProcesses++;
     }
-    fin.close();
+    fclose(fin);
 
-    cout << "+++ Simulation data read from file" << endl;
-    cout << "+++ Kernel data initialized" << endl;
+    printf("+++ Simulation data read from file\n");
+    printf("+++ Kernel data initialized\n");
 
 #ifdef VERBOSE
     cout << "+++ Running in VERBOSE mode" << endl;
