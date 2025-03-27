@@ -59,7 +59,7 @@ void initproc(Process *proc, int id, int size, int searches) {
 queue<int> readyQ;                                  // holds process ids of active processes (round robin)
 queue<int> swappedQ;                                // FIFO queue of swapped-out processes (store process id)
 vector<int> freeFrames;                             // free frame list (store frame numbers)
-vector<Process*> processes;                         // all processes indexed by pid
+Process **processes;                         // all processes indexed by pid
 
 // Statistics
 uint64_t pageAccesses = 0;
@@ -186,7 +186,11 @@ int main() {
     fscanf(fin, "%d %d", &totalProcesses, &searchesPerProcess);
 
     // Creating processes and initializing their page tables
-    processes.resize(totalProcesses, nullptr);
+    processes = (Process **)malloc(totalProcesses * sizeof(Process *));
+    if (processes == NULL) {
+        fprintf(stderr, "Error: Memory allocation failed\n");
+        exit(1);
+    }
     for (int i = 0; i < totalProcesses; i++) {
         int s;
         fscanf(fin, "%d", &s);
@@ -196,6 +200,7 @@ int main() {
             exit(1);
         }
         initproc(proc, i, s, searchesPerProcess);
+        processes[i] = proc;
         
         // Read m search keys
         for (int j = 0; j < searchesPerProcess; j++) {
@@ -310,8 +315,11 @@ int main() {
     cout << "Degree of multiprogramming = " << minActiveProcesses << endl;
 
     // Cleanup: free all process objects.
-    for (size_t i = 0; i < processes.size(); i++) {
-        delete processes[i];
+    for (int i = 0; i < totalProcesses; i++) {
+        free(processes[i]->keys);
+        free(processes[i]->pt);
+        free(processes[i]);
     }
+    free(processes);
     return 0;
 }
