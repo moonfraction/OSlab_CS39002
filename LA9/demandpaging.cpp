@@ -58,10 +58,11 @@ void initproc(Process *proc, int id, int size, int searches) {
 // Global kernel data
 queue<int> readyQ;                                  // holds process ids of active processes (round robin)
 queue<int> swappedQ;                                // FIFO queue of swapped-out processes (store process id)
-vector<int> freeFrames;                             // free frame list (store frame numbers)
+int *freeFrames;                             // free frame list (store frame numbers)
 Process **processes;                         // all processes indexed by pid
 
 // Statistics
+int cntff = 0;
 uint64_t pageAccesses = 0;
 uint64_t pageFaults = 0;
 uint64_t swapCount = 0;
@@ -74,10 +75,12 @@ int searchesPerProcess = 0;                         // m
 // This function allocates a free frame and assigns it to the given virtual page.
 // Returns true if allocation succeeded.
 bool allocateFrame(Process *proc, int vpage) {
-    if(freeFrames.empty()) return false;
+    if(cntff == 0) {
+        return false;
+    }
+    cntff--;
 
-    int frame = freeFrames.back();
-    freeFrames.pop_back();
+    int frame = freeFrames[cntff];
     proc->pt[vpage] = makeEntry(frame);
     return true;
 }
@@ -97,8 +100,8 @@ void freeProcessFrames(Process *proc) {
     for (int i = 0; i < PAGE_TABLE_ENTRIES; i++) {
         if (isValid(proc->pt[i])) {
             int frame = proc->pt[i] & 0x7FFF;
-            freeFrames.push_back(frame);
-            proc->pt[i] = 0;
+            freeFrames[cntff++] = frame;
+            invalidate(proc->pt[i]);
         }
     }
 }
@@ -119,7 +122,7 @@ bool simulateBinarySearch(Process *proc, int k) {
         if (!isValid(proc->pt[vpage])) {
             // Page fault occurs: try to allocate a free frame.
             pageFaults++;
-            if (freeFrames.empty()) {
+            if (cntff == 0) {
                 // No free frame available: need to swap out this process.
                 return false;
             } else {
@@ -172,9 +175,15 @@ bool swapIn(Process *proc) {
 
 int main() {
     // initially all frames are free
-    for (int i = 0; i < USER_FRAMES; i++) {
-        freeFrames.push_back(i);
+    freeFrames = (int *)malloc(USER_FRAMES * sizeof(int));
+    if (freeFrames == NULL) {
+        fprintf(stderr, "Error: Memory allocation failed\n");
+        exit(1);
     }
+    for (int i = 0; i < USER_FRAMES; i++) {
+        freeFrames[i] = i;
+    }
+    cntff = USER_FRAMES;
 
     // Read input from search.txt
     FILE *fin = fopen("search.txt", "r");
