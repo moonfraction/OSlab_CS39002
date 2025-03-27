@@ -37,9 +37,9 @@ struct Process {
     int pid;                                        // process id
     int s;                                          // size of array A (number of integers)
     int m;                                          // number of searches to perform
-    int *keys;                                  // search keys (each search key is an index in A)
+    int *keys;                                      // search keys (each search key is an index in A)
     int currentSearch;                              // index of next search to perform
-    uint16_t *pt;                            // page table of size PAGE_TABLE_ENTRIES (each entry is 16-bit)
+    uint16_t *pt;                                   // page table of size PAGE_TABLE_ENTRIES (each entry is 16-bit)
 };
 
 void initproc(Process *proc, int id, int size, int searches) {
@@ -58,11 +58,11 @@ void initproc(Process *proc, int id, int size, int searches) {
 // Global kernel data
 queue<int> readyQ;                                  // holds process ids of active processes (round robin)
 queue<int> swappedQ;                                // FIFO queue of swapped-out processes (store process id)
-int *freeFrames;                             // free frame list (store frame numbers)
-Process **processes;                         // all processes indexed by pid
+int *freeFrames;                                    // free frame list (store frame numbers)
+Process **processes;                                // all processes indexed by pid
 
 // Statistics
-int cntff = 0;
+int cntff = 0;                                      // count of free frames
 uint64_t pageAccesses = 0;
 uint64_t pageFaults = 0;
 uint64_t swapCount = 0;
@@ -154,8 +154,7 @@ void swapOut(Process *proc) {
     if (activeProcesses < minActiveProcesses)
         minActiveProcesses = activeProcesses;
     // Print swap-out message (non-verbose mode prints only swap messages)
-    cout << "+++ Swapping out process " << proc->pid 
-        << " [" << activeProcesses << " active processes]" << endl;
+    printf("+++ Swapping out process %4d [ %d active processes]\n", proc->pid, activeProcesses);
     swappedQ.push(proc->pid);
 }
 
@@ -168,8 +167,8 @@ bool swapIn(Process *proc) {
         // This should not happen if frames were freed properly.
         return false;
     }
-    cout << "+++ Swapping in process " << proc->pid 
-        << " [" << (activeProcesses+1) << " active processes]" << endl;
+    printf("+++ Swapping in process %4d [ %d active processes]\n", proc->pid, activeProcesses+1);
+
     return true;
 }
 
@@ -209,7 +208,6 @@ int main() {
             exit(1);
         }
         initproc(proc, i, s, searchesPerProcess);
-        processes[i] = proc;
         
         // Read m search keys
         for (int j = 0; j < searchesPerProcess; j++) {
@@ -233,11 +231,11 @@ int main() {
     printf("+++ Kernel data initialized\n");
 
 #ifdef VERBOSE
-    cout << "+++ Running in VERBOSE mode" << endl;
+    printf("--> Running in VERBOSE mode\n");
 #endif
 
     int completedCount = 0;
-    // Simulation loop: continue until all processes have finished
+    
     while (completedCount < totalProcesses) {
         // If readyQ is empty but there are swapped-out processes waiting,
         // swap one in.
@@ -251,15 +249,14 @@ int main() {
             activeProcesses++;
             readyQ.push(pidToSwap);
         }
-        if (readyQ.empty())
-            break; // safety check
+        if (readyQ.empty()) break; // safety check
 
         int pid = readyQ.front();
         readyQ.pop();
         Process *proc = processes[pid];
 
 #ifdef VERBOSE
-        cout << "Process " << pid << " performing search " << proc->currentSearch << endl;
+        printf("\t Search %d by Process %d\n", proc->currentSearch, pid);
 #endif
 
         // If the process has finished all its searches, terminate it.
@@ -289,9 +286,10 @@ int main() {
             // Do not advance currentSearch; the search will be restarted after swap-in.
         } else {
             // Binary search finished successfully.
-#ifdef VERBOSE
-            cout << "Process " << pid << " completed search " << proc->currentSearch << endl;
-#endif
+
+// #ifdef VERBOSE
+//             cout << "Process " << pid << " completed search " << proc->currentSearch << endl;
+// #endif
             proc->currentSearch++; // move to next search
             // After a successful search, requeue the process if it has more searches.
             if (proc->currentSearch < proc->m) {
