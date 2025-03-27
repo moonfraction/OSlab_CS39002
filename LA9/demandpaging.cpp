@@ -1,11 +1,7 @@
-#include <iostream>
-#include <fstream>
-#include <sstream>
 #include <queue>
-#include <vector>
-#include <cstdint>
-#include <cassert>
-#include <cmath>
+#include <stdio.h>
+#include <stdlib.h>
+
 using namespace std;
 
 // Constants
@@ -186,7 +182,7 @@ bool swapInNextProcess() {
     Process* proc = processes[pidToSwap];
     
     if (!swapIn(proc)) {
-        cerr << "Error during swap-in." << endl;
+        perror("Error: Not enough free frames to swap in process");
         return false;
     }
     activeProcesses++;
