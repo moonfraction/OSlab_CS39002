@@ -1,4 +1,3 @@
-
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -172,6 +171,27 @@ bool swapIn(Process *proc) {
     return true;
 }
 
+bool swapInNextProcess() {
+    if (swappedQ.empty()) {
+        return false; // No processes to swap in
+    }
+    
+    int pidToSwap = swappedQ.front();
+    swappedQ.pop();
+    if (!swapIn(processes[pidToSwap])) {
+        cerr << "Error during swap-in." << endl;
+        return false;
+    }
+    activeProcesses++;
+    readyQ.push(pidToSwap);
+    return true;
+}
+
+void terminateProcess(Process *proc) {
+    freeProcessFrames(proc);
+    activeProcesses--;
+}
+
 int main() {
     // initially all frames are free
     freeFrames = (int *)malloc(USER_FRAMES * sizeof(int));
@@ -237,20 +257,13 @@ int main() {
     int completedCount = 0;
     
     while (completedCount < totalProcesses) {
-        // If readyQ is empty but there are swapped-out processes waiting,
-        // swap one in.
-        if (readyQ.empty() && !swappedQ.empty()) {
-            int pidToSwap = swappedQ.front();
-            swappedQ.pop();
-            if (!swapIn(processes[pidToSwap])) {
-                cerr << "Error during swap-in." << endl;
-                return 1;
+        // If readyQ is empty but there are swapped-out processes waiting, swap one in
+        if (readyQ.empty()) {
+            if (!swapInNextProcess()) {
+                break; // No more processes to run
             }
-            activeProcesses++;
-            readyQ.push(pidToSwap);
         }
-        if (readyQ.empty()) break; // safety check
-
+        
         int pid = readyQ.front();
         readyQ.pop();
         Process *proc = processes[pid];
@@ -259,57 +272,36 @@ int main() {
         printf("\t Search %d by Process %d\n", proc->currentSearch, pid);
 #endif
 
-        // If the process has finished all its searches, terminate it.
+        // If the process has finished all its searches, terminate it
         if (proc->currentSearch >= proc->m) {
-            freeProcessFrames(proc);
-            activeProcesses--;
+            terminateProcess(proc);
             completedCount++;
-            // After termination, if there are swapped-out processes, swap one in.
-            if (!swappedQ.empty()) {
-                int swapPid = swappedQ.front();
-                swappedQ.pop();
-                if (!swapIn(processes[swapPid])) {
-                    cerr << "Error during swap-in." << endl;
-                    return 1;
-                }
-                activeProcesses++;
-                readyQ.push(swapPid);
-            }
+            // Try to swap in another process
+            swapInNextProcess();
             continue;
         }
-        // Simulate one binary search for the current search key.
+        
+        // Simulate one binary search for the current search key
         int key = proc->keys[proc->currentSearch];
         bool success = simulateBinarySearch(proc, key);
+        
         if (!success) {
-            // Swap out the process because free frame list was empty.
+            // Swap out the process because free frame list was empty
             swapOut(proc);
-            // Do not advance currentSearch; the search will be restarted after swap-in.
+            // The search will be restarted after swap-in
         } else {
-            // Binary search finished successfully.
-
-// #ifdef VERBOSE
-//             cout << "Process " << pid << " completed search " << proc->currentSearch << endl;
-// #endif
+            // Binary search finished successfully 
             proc->currentSearch++; // move to next search
-            // After a successful search, requeue the process if it has more searches.
+            
+            // Check if process has more searches
             if (proc->currentSearch < proc->m) {
-                readyQ.push(pid);
+                readyQ.push(pid); // Requeue for more searches
             } else {
-                // Process finished: free its frames and update counters.
-                freeProcessFrames(proc);
-                activeProcesses--;
+                // Process finished all searches
+                terminateProcess(proc);
                 completedCount++;
-                // Check if a swapped-out process can be swapped in.
-                if (!swappedQ.empty()) {
-                    int swapPid = swappedQ.front();
-                    swappedQ.pop();
-                    if (!swapIn(processes[swapPid])) {
-                        cerr << "Error during swap-in." << endl;
-                        return 1;
-                    }
-                    activeProcesses++;
-                    readyQ.push(swapPid);
-                }
+                // Try to swap in another process
+                swapInNextProcess();
             }
         }
     }
