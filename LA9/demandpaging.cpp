@@ -62,9 +62,9 @@ Process **processes;                                // all processes indexed by 
 
 // Statistics
 int cntff = 0;                                      // count of free frames
-uint64_t pageAccesses = 0;
-uint64_t pageFaults = 0;
-uint64_t swapCount = 0;
+int pageAccesses = 0;
+int pageFaults = 0;
+int swapCount = 0;
 int activeProcesses = 0;                            // count of processes in memory (not swapped out)
 int minActiveProcesses = 1000000;                   // track minimum active processes when memory full
 int totalProcesses = 0;                             // n
@@ -338,11 +338,11 @@ int main() {
     }
 
     // Print final statistics.
-    cout << "+++ Page access summary" << endl;
-    cout << "\tTotal number of page accesses = " << pageAccesses << endl;
-    cout << "\tTotal number of page faults = " << pageFaults << endl;
-    cout << "\tTotal number of swaps = " << swapCount << endl;
-    cout << "\tDegree of multiprogramming = " << minActiveProcesses << endl;
+    printf("+++ Page access summary\n");
+    printf("\tTotal number of page accesses  = %d\n", pageAccesses);
+    printf("\tTotal number of page faults    = %d\n", pageFaults);
+    printf("\tTotal number of swaps          = %d\n", swapCount);
+    printf("\tDegree of multiprogramming     = %d\n", minActiveProcesses);
 
     // Cleanup: free all process objects.
     for (int i = 0; i < totalProcesses; i++) {
