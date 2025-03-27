@@ -1,0 +1,4 @@
+1c1
+< g++ -Wall -o runsearch demandpaging.cpp
+---
+> gcc -Wall -o runsearch demandpaging.c
