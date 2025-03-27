@@ -268,9 +268,6 @@ int main() {
         readyQ.pop();
         Process *proc = processes[pid];
 
-#ifdef VERBOSE
-        printf("\tSearch %d by Process %d\n", proc->currentSearch+1, pid);
-#endif
 
         // If the process has finished all its searches, terminate it
         if (proc->currentSearch >= proc->m) {
@@ -283,6 +280,11 @@ int main() {
         
         // Simulate one binary search for the current search key
         int key = proc->keys[proc->currentSearch];
+
+        #ifdef VERBOSE
+        printf("\tSearch %d by Process %d\n", proc->currentSearch+1, pid);
+        #endif
+
         bool success = simulateBinarySearch(proc, key);
         
         if (!success) {
