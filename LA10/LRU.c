@@ -149,7 +149,7 @@ bool allocateEssentialPages(Process *proc) {
 
 // When a process exits, free all its frames and append them to the free frame list (using tail insertion).
 void freeProcessFrames(Process *proc) {
-    for (int i = 0; i < PAGE_TABLE_ENTRIES; i++) {
+    for (int i = PAGE_TABLE_ENTRIES - 1; i >= 0; i--) {
         if (isValid(proc->pt[i].entry)) {
             int frame = getFrame(proc->pt[i].entry);
             freeFrames[NFF].frameNumber = frame;
@@ -208,7 +208,7 @@ int findSuitableFrame(Process *proc, int vpage) {
     // Attempt 3: frame with same owner (different page).
     if (frameIndex == -1) {
         for (int i = NFF - 1; i >= 0; i--) {
-            if (freeFrames[i].lastOwner == proc->pid && freeFrames[i].lastPage != vpage) {
+            if (freeFrames[i].lastOwner == proc->pid) {
                 frameIndex = i;
                 attemptUsed = 2;
                 #ifdef VERBOSE
@@ -288,7 +288,7 @@ bool simulateBinarySearch(Process *proc, int k) {
                 }
                 int victimFrame = getFrame(proc->pt[victimPage].entry);
                 #ifdef VERBOSE
-                    printf("To replace Page %4d at Frame %d [history = %d]\n",
+                    printf("To replace Page %3d at Frame %d [history = %d]\n",
                         victimPage, victimFrame, proc->pt[victimPage].history);
                 #endif
                 
