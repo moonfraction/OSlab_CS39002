@@ -8,6 +8,6 @@ db: gensearch.c
 	gcc -Wall -o gensearch gensearch.c
 	./gensearch
 clean:
-	-rm -f runsearch gensearch
+	rm -f runsearch gensearch
 deepclean: clean
-	-rm -f *output.txt
+	rm -f *output.txt
