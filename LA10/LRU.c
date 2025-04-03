@@ -184,6 +184,9 @@ int findSuitableFrame(Process *proc, int vpage) {
         if (freeFrames[i].lastOwner == proc->pid && freeFrames[i].lastPage == vpage) {
             frameIndex = i;
             attemptUsed = 0;
+            #ifdef VERBOSE
+                printf("        Attempt 1: Page found in free frame %d\n", freeFrames[i].frameNumber);
+            #endif
             break;
         }
     }
@@ -194,6 +197,9 @@ int findSuitableFrame(Process *proc, int vpage) {
             if (freeFrames[i].lastOwner == -1) {
                 frameIndex = i;
                 attemptUsed = 1;
+                #ifdef VERBOSE
+                    printf("        Attempt 2: Free frame %d owned by no process found\n", freeFrames[i].frameNumber);
+                #endif
                 break;
             }
         }
@@ -205,6 +211,9 @@ int findSuitableFrame(Process *proc, int vpage) {
             if (freeFrames[i].lastOwner == proc->pid && freeFrames[i].lastPage != vpage) {
                 frameIndex = i;
                 attemptUsed = 2;
+                #ifdef VERBOSE
+                    printf("        Attempt 3: Own page %d found in free frame %d\n", freeFrames[i].lastPage, freeFrames[i].frameNumber);
+                #endif
                 break;
             }
         }
@@ -214,6 +223,10 @@ int findSuitableFrame(Process *proc, int vpage) {
     if (frameIndex == -1) {
         frameIndex = rand() % NFF;
         attemptUsed = 3;
+        #ifdef VERBOSE
+            printf("        Attempt 4: Free frame %d owned by Process %d chosen\n",
+                freeFrames[frameIndex].frameNumber, freeFrames[frameIndex].lastOwner);
+        #endif
     }
     
     proc->attemptCounts[attemptUsed]++;
