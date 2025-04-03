@@ -267,6 +267,9 @@ bool simulateBinarySearch(Process *proc, int k) {
         if (!isValid(proc->pt[vpage].entry)) {
             // Page fault
             proc->pageFaults++;
+            #ifdef VERBOSE
+                        printf("    Fault on page %d: ", vpage);
+            #endif
             totalPageFaults++;
             
             if (NFF > NFFMIN) {
@@ -275,11 +278,14 @@ bool simulateBinarySearch(Process *proc, int k) {
                     fprintf(stderr, "Error: Failed to allocate frame with sufficient free frames\n");
                     return false;
                 }
+                #ifdef VERBOSE
+                                printf("Free frame %d found\n", getFrame(proc->pt[vpage].entry));
+                #endif
             } else {
                 // Need page replacement
                 proc->pageReplacements++;
                 totalPageReplacements++;
-                
+
                 // Find victim page
                 int victimPage = findVictimPage(proc);
                 if (victimPage == -1) {
@@ -289,6 +295,11 @@ bool simulateBinarySearch(Process *proc, int k) {
                 
                 // Get the frame of victim page
                 int victimFrame = getFrame(proc->pt[victimPage].entry);
+                
+                #ifdef VERBOSE
+                                printf("To replace Page %d at Frame %d [history = %d]\n", 
+                                       victimPage, victimFrame, proc->pt[victimPage].history);
+                #endif
                 
                 // Find suitable free frame from FFLIST
                 int frameIndex = findSuitableFrame(proc, vpage);
@@ -451,7 +462,7 @@ int main() {
         int key = proc->keys[proc->currentSearch];
         
         #ifdef VERBOSE
-        printf("Process %d: Search %d\n", proc->pid, proc->currentSearch + 1);
+        printf("+++ Process %d: Search %d\n", proc->pid, proc->currentSearch + 1);
         #endif
         
         bool success = simulateBinarySearch(proc, key);
