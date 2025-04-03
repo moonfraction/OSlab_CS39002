@@ -180,7 +180,7 @@ int findSuitableFrame(Process *proc, int vpage) {
     int attemptUsed = -1;
     
     // Attempt 1: frame with same owner and page.
-    for (int i = 0; i < NFF; i++) {
+    for (int i = NFF - 1; i >= 0; i--) {
         if (freeFrames[i].lastOwner == proc->pid && freeFrames[i].lastPage == vpage) {
             frameIndex = i;
             attemptUsed = 0;
@@ -193,7 +193,7 @@ int findSuitableFrame(Process *proc, int vpage) {
     
     // Attempt 2: frame with no owner.
     if (frameIndex == -1) {
-        for (int i = 0; i < NFF; i++) {
+        for (int i = NFF - 1; i >= 0; i--) {
             if (freeFrames[i].lastOwner == -1) {
                 frameIndex = i;
                 attemptUsed = 1;
@@ -207,7 +207,7 @@ int findSuitableFrame(Process *proc, int vpage) {
     
     // Attempt 3: frame with same owner (different page).
     if (frameIndex == -1) {
-        for (int i = 0; i < NFF; i++) {
+        for (int i = NFF - 1; i >= 0; i--) {
             if (freeFrames[i].lastOwner == proc->pid && freeFrames[i].lastPage != vpage) {
                 frameIndex = i;
                 attemptUsed = 2;
@@ -291,6 +291,7 @@ bool simulateBinarySearch(Process *proc, int k) {
                     printf("To replace Page %4d at Frame %d [history = %d]\n",
                         victimPage, victimFrame, proc->pt[victimPage].history);
                 #endif
+                
                 int frameIndex = findSuitableFrame(proc, vpage);
                 int newFrame = freeFrames[frameIndex].frameNumber;
                 removeFreeFrameAt(frameIndex);
@@ -358,7 +359,7 @@ void readinput(){
 }
 
 void printProcessStatistics(Process *proc) {
-    printf("    %-3d       %d    %5d   (%5.2f%%)  %5d   (%5.2f%%)    %3d + %3d + %3d + %3d (%4.2f%% + %4.2f%% + %4.2f%% + %4.2f%%)\n",
+    printf("    %-3d       %d    %5d   (%5.2f%%)  %5d   (%5.2f%%)    %3d + %3d + %3d + %d (%4.2f%% + %4.2f%% + %4.2f%% + %4.2f%%)\n",
            proc->pid,
            proc->pageAccesses,
            proc->pageFaults,
@@ -376,7 +377,7 @@ void printProcessStatistics(Process *proc) {
 }
 
 void printTotalStatistics() {
-    printf("\n    Total     %d    %5d (%5.2f%%)    %5d (%5.2f%%)    %3d + %3d + %3d + %3d (%4.2f%% + %4.2f%% + %4.2f%% + %4.2f%%)\n",
+    printf("\n    Total     %d    %5d (%5.2f%%)    %5d (%5.2f%%)    %3d + %3d + %3d + %d (%4.2f%% + %4.2f%% + %4.2f%% + %4.2f%%)\n",
            totalPageAccesses,
            totalPageFaults,
            (totalPageFaults * 100.0) / totalPageAccesses,
