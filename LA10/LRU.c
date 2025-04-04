@@ -4,405 +4,483 @@
 #include <stdbool.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
-// Constants
-const int PAGE_SIZE = 4096;                         // 4 KB
-const int TOTAL_MEMORY = 64 * 1024 * 1024;          // 64 MB
-const int OS_MEMORY = 16 * 1024 * 1024;             // 16 MB
-const int USER_MEMORY = 48 * 1024 * 1024;           // 48 MB
-const int TOTAL_FRAMES = TOTAL_MEMORY / PAGE_SIZE;  // 16384 frames
-const int USER_FRAMES = USER_MEMORY / PAGE_SIZE;    // 12288 frames
-const int OS_FRAMES = OS_MEMORY / PAGE_SIZE;        // 4096 frames
-const int INTS_PER_PAGE = PAGE_SIZE / 4;            // 1024 integers per page
-const int PAGE_TABLE_ENTRIES = 2048;                // per process page table entries
-const int ESSENTIAL_PAGES = 10;                     // first 10 pages are essential
-const int NFFMIN = 1000;                            // minimum number of free frames
+// System parameters
+const int PAGE_SIZE = 4096;                         
+const int TOTAL_MEMORY = 64 * 1024 * 1024;          
+const int OS_MEMORY = 16 * 1024 * 1024;             
+const int USER_MEMORY = TOTAL_MEMORY - OS_MEMORY;   
+const int TOTAL_FRAMES = TOTAL_MEMORY / PAGE_SIZE;  
+const int OS_FRAMES = OS_MEMORY / PAGE_SIZE;        
+const int USER_FRAMES = USER_MEMORY / PAGE_SIZE;    
+const int INTS_PER_PAGE = PAGE_SIZE / sizeof(int);  
+const int PAGE_TABLE_ENTRIES = 2048;                
+const int ESSENTIAL_PAGES = 10;                     
+const int NFFMIN = 1000;                            
 
-// Extended page table entry with history
+// Page table entry with age tracking for LRU
 typedef struct {
-    uint16_t entry;      // MSB (bit 15)=valid, bit 14=reference, bits 0-13=frame number
-    uint16_t history;    // History bits for approximate LRU
+    uint16_t entry;      // Structure: Valid(15) | Ref(14) | FrameNum(0-13)
+    uint16_t history;    // Tracks reference history for LRU approximation
 } PageTableEntry;
 
-// Free frame list entry
+// Frame list entry for managing free frames
 typedef struct {
-    int frameNumber;     // frame number
-    int lastOwner;       // last process that owned this frame (-1 if none)
-    int lastPage;        // page number in last owner (-1 if none)
+    int frameNumber;     
+    int lastOwner;       
+    int lastPage;        
 } FrameListEntry;
 
-// Process structure
+// Process control block
 typedef struct {
-    int pid;              // process id
-    int s;                // size of array A (number of integers)
-    int m;                // number of searches to perform
-    int *keys;            // search keys (each key is an index in A)
-    int currentSearch;    // next search index to perform
-    PageTableEntry *pt;   // page table (array of PAGE_TABLE_ENTRIES entries)
-    // Statistics
+    int pid;              
+    int s;                
+    int m;                
+    int *keys;            
+    int currentSearch;    
+    PageTableEntry *pt;   
+    // Performance metrics
     int pageAccesses;
     int pageFaults;
     int pageReplacements;
-    int attemptCounts[4]; // Counts for replacement attempts 1-4
+    int attemptCounts[4]; 
 } Process;
 
-// Bit mask macros for page table entry
-#define VALID_BIT 0x8000    // Bit 15 (MSB)
-#define REF_BIT   0x4000    // Bit 14
-#define FRAME_MASK 0x3FFF   // Bits 0-13
+// Bit definitions for page table entries
+#define VALID_FLAG 0x8000    
+#define REF_FLAG   0x4000    
+#define FRAME_NUM_MASK 0x3FFF
 
-// Functions to manipulate page table entries
+// Page table entry manipulation
 bool isValid(uint16_t entry) {
-    return (entry & VALID_BIT) != 0;
+    return (entry & VALID_FLAG) ? true : false;
 }
 
 bool isReferenced(uint16_t entry) {
-    return (entry & REF_BIT) != 0;
+    return (entry & REF_FLAG) ? true : false;
 }
 
 int getFrame(uint16_t entry) {
-    return entry & FRAME_MASK;
+    return (int)(entry & FRAME_NUM_MASK);
 }
 
 uint16_t makeEntry(int frame, bool referenced) {
-    return (uint16_t)((frame & FRAME_MASK) | VALID_BIT | (referenced ? REF_BIT : 0));
+    uint16_t result = VALID_FLAG;
+    if (referenced) result |= REF_FLAG;
+    return result | (frame & FRAME_NUM_MASK);
 }
 
 void setReferenced(uint16_t *entry) {
-    *entry |= REF_BIT;
+    *entry = (*entry) | REF_FLAG;
 }
 
 void clearReferenced(uint16_t *entry) {
-    *entry &= ~REF_BIT;
+    *entry = (*entry) & (~REF_FLAG);
 }
 
 void invalidate(uint16_t *entry) {
     *entry = 0;
 }
 
-// Global kernel data
-FrameListEntry *freeFrames;  // free frame list (array of USER_FRAMES entries)
-int NFF = 0;                 // current number of free frames
-Process **processes;         // pointer array of processes
-int totalProcesses = 0;      // n (total processes)
-int searchesPerProcess = 0;  // m (searches per process)
+// Global state
+FrameListEntry *freeFrames;
+Process **processes;
+int NFF = 0;
+int totalProcesses = 0;
+int searchesPerProcess = 0;
 
-// Global statistics
+// Global metrics
 int totalPageAccesses = 0;
 int totalPageFaults = 0;
 int totalPageReplacements = 0;
-int totalAttemptCounts[4] = {0, 0, 0, 0};
+int totalAttemptCounts[4] = {0};
 
-// Initialize a process structure
+// Helper function to allocate and initialize memory
+void* safeAlloc(size_t size) {
+    void* ptr = malloc(size);
+    if (!ptr) {
+        fprintf(stderr, "Fatal error: Memory allocation failed\n");
+        exit(EXIT_FAILURE);
+    }
+    memset(ptr, 0, size);
+    return ptr;
+}
+
+// Initialize process data structure
 void initproc(Process *proc, int id, int size, int searches) {
     proc->pid = id;
     proc->s = size;
     proc->m = searches;
     proc->currentSearch = 0;
-    proc->keys = (int *)malloc(searches * sizeof(int));
-    proc->pt = (PageTableEntry *)malloc(PAGE_TABLE_ENTRIES * sizeof(PageTableEntry));
     
-    if (proc->keys == NULL || proc->pt == NULL) {
-        fprintf(stderr, "Error: Memory allocation failed\n");
-        exit(1);
-    }
+    // Allocate arrays
+    proc->keys = (int*)safeAlloc(searches * sizeof(int));
+    proc->pt = (PageTableEntry*)safeAlloc(PAGE_TABLE_ENTRIES * sizeof(PageTableEntry));
     
-    for (int i = 0; i < PAGE_TABLE_ENTRIES; i++) {
-        proc->pt[i].entry = 0;
-        proc->pt[i].history = 0;
-    }
-    
+    // Reset statistics counters
     proc->pageAccesses = 0;
     proc->pageFaults = 0;
     proc->pageReplacements = 0;
-    memset(proc->attemptCounts, 0, sizeof(proc->attemptCounts));
+    for (int i = 0; i < 4; i++) {
+        proc->attemptCounts[i] = 0;
+    }
 }
 
-// Allocate a free frame for a process from the head of the free frame list.
-// This implementation shifts the array so that free frames are allocated in increasing order.
-bool allocateFrame(Process *proc, int vpage) {
-    if (NFF == 0) return false;
-    
-    // Remove from the head (index 0)
-    int frame = freeFrames[0].frameNumber;
-    // Shift the array left by one
-    for (int i = 1; i < NFF; i++) {
-        freeFrames[i - 1] = freeFrames[i];
+void removeFreeFrameAt(int idx) {
+    for (int i = idx; i < NFF - 1; i++) {
+        freeFrames[i] = freeFrames[i + 1];
     }
     NFF--;
+}
+
+// Frame allocation from free list
+bool allocateFrame(Process *proc, int vpage) {
+    if (NFF <= 0) return false;
     
-    proc->pt[vpage].entry = makeEntry(frame, true);
-    proc->pt[vpage].history = 0xFFFF;
+    int assignedFrame = freeFrames[0].frameNumber;
+    
+    // Remove from free list
+    removeFreeFrameAt(0);
+    
+    // Update page table
+    proc->pt[vpage].entry = makeEntry(assignedFrame, true);
+    proc->pt[vpage].history = 0xFFFF;  // All bits set (recently used)
     
     return true;
 }
 
-// Allocate essential pages for a process.
+// Allocate essential pages for a process
 bool allocateEssentialPages(Process *proc) {
-    for (int vp = 0; vp < ESSENTIAL_PAGES; vp++) {
-        if (!allocateFrame(proc, vp))
-            return false;
-        proc->pt[vp].history = 0xFFFF;
+    for (int page = 0; page < ESSENTIAL_PAGES; page++) {
+        if (!allocateFrame(proc, page)) {
+            return false;  // Not enough memory
+        }
     }
     return true;
 }
 
-// When a process exits, free all its frames and append them to the free frame list (using tail insertion).
+// Return all frames back to free list when a process exits
 void freeProcessFrames(Process *proc) {
-    for (int i = PAGE_TABLE_ENTRIES - 1; i >= 0; i--) {
-        if (isValid(proc->pt[i].entry)) {
-            int frame = getFrame(proc->pt[i].entry);
+    for (int page = 0; page < PAGE_TABLE_ENTRIES; page++) {
+        if (isValid(proc->pt[page].entry)) {
+            int frame = getFrame(proc->pt[page].entry);
+            
+            // Add to free list
             freeFrames[NFF].frameNumber = frame;
             freeFrames[NFF].lastOwner = proc->pid;
-            freeFrames[NFF].lastPage = i;
+            freeFrames[NFF].lastPage = page;
             NFF++;
-            invalidate(&proc->pt[i].entry);
+            
+            // Mark as invalid in page table
+            invalidate(&proc->pt[page].entry);
         }
     }
 }
 
-// Find the victim page for replacement (non-essential pages) using approximate LRU.
 int findVictimPage(Process *proc) {
-    int victimPage = -1;
-    uint16_t minHistory = 0xFFFF;
-    for (int i = ESSENTIAL_PAGES; i < PAGE_TABLE_ENTRIES; i++) {
-        if (isValid(proc->pt[i].entry) && proc->pt[i].history < minHistory) {
-            minHistory = proc->pt[i].history;
-            victimPage = i;
+    int victim = -1;
+    uint16_t lowestUsage = 0xFFFF;
+    
+    // page with lowest history value (least recently used)
+    for (int page = ESSENTIAL_PAGES; page < PAGE_TABLE_ENTRIES; page++) {
+        if (!isValid(proc->pt[page].entry)) continue;
+        
+        if (proc->pt[page].history < lowestUsage) {
+            lowestUsage = proc->pt[page].history;
+            victim = page;
         }
     }
-    return victimPage;
+    
+    return victim;
 }
 
-// Find a suitable free frame using four strategies.
+// Helper to print attempt details in verbose mode
+void p_Attempt(int attempt, int frame, int owner, int page) {
+    #ifdef VERBOSE
+    switch (attempt) {
+        case 0:
+            printf("        Attempt 1: Page found in free frame %d\n", frame);
+            break;
+        case 1:
+            printf("        Attempt 2: Free frame %d owned by no process found\n", frame);
+            break;
+        case 2:
+            printf("        Attempt 3: Own page %d found in free frame %d\n", 
+                   page, frame);
+            break;
+        case 3:
+            printf("        Attempt 4: Random frame %d owned by Process %d chosen\n",
+                   frame, owner);
+            break;
+    }
+    #endif
+}
+
 int findSuitableFrame(Process *proc, int vpage) {
     int frameIndex = -1;
     int attemptUsed = -1;
     
-    // Attempt 1: frame with same owner and page.
-    for (int i = NFF - 1; i >= 0; i--) {
-        if (freeFrames[i].lastOwner == proc->pid && freeFrames[i].lastPage == vpage) {
+    // Attmept 1: frames that held the same page for this process
+    for (int i = NFF-1; i >= 0; i--) {
+        if (freeFrames[i].lastOwner == proc->pid && 
+            freeFrames[i].lastPage == vpage) {
             frameIndex = i;
             attemptUsed = 0;
-            #ifdef VERBOSE
-                printf("        Attempt 1: Page found in free frame %d\n", freeFrames[i].frameNumber);
-            #endif
+            p_Attempt(0, freeFrames[i].frameNumber, proc->pid, vpage);
             break;
         }
     }
     
-    // Attempt 2: frame with no owner.
+    // Attmept 2: no previous owner
     if (frameIndex == -1) {
         for (int i = NFF - 1; i >= 0; i--) {
             if (freeFrames[i].lastOwner == -1) {
                 frameIndex = i;
                 attemptUsed = 1;
-                #ifdef VERBOSE
-                    printf("        Attempt 2: Free frame %d owned by no process found\n", freeFrames[i].frameNumber);
-                #endif
+                p_Attempt(1, freeFrames[i].frameNumber, -1, -1);
                 break;
             }
         }
     }
     
-    // Attempt 3: frame with same owner (different page).
+    // Attmept 3: Try frames owned by same process
     if (frameIndex == -1) {
         for (int i = NFF - 1; i >= 0; i--) {
             if (freeFrames[i].lastOwner == proc->pid) {
                 frameIndex = i;
                 attemptUsed = 2;
-                #ifdef VERBOSE
-                    printf("        Attempt 3: Own page %d found in free frame %d\n", freeFrames[i].lastPage, freeFrames[i].frameNumber);
-                #endif
+                p_Attempt(2, freeFrames[i].frameNumber, proc->pid, 
+                                 freeFrames[i].lastPage);
                 break;
             }
         }
     }
     
-    // Attempt 4: pick a random free frame.
+    // Attmept 4: Pick any random frame
     if (frameIndex == -1) {
-        frameIndex = rand() % NFF;
+        frameIndex = 0; // Randomly select the first frame
         attemptUsed = 3;
-        #ifdef VERBOSE
-            printf("        Attempt 4: Free frame %d owned by Process %d chosen\n",
-                freeFrames[frameIndex].frameNumber, freeFrames[frameIndex].lastOwner);
-        #endif
+        p_Attempt(3, freeFrames[frameIndex].frameNumber, 
+                         freeFrames[frameIndex].lastOwner,
+                         freeFrames[frameIndex].lastPage);
     }
     
+    // Update statistics
     proc->attemptCounts[attemptUsed]++;
     totalAttemptCounts[attemptUsed]++;
+    
     return frameIndex;
 }
 
-// Shift freeFrames array to remove the entry at index idx.
-void removeFreeFrameAt(int idx) {
-    for (int i = idx + 1; i < NFF; i++) {
-        freeFrames[i - 1] = freeFrames[i];
-    }
-    NFF--;
-}
-
-// Update history for each valid page after a binary search.
 void updatePageHistory(Process *proc) {
-    for (int i = 0; i < PAGE_TABLE_ENTRIES; i++) {
-        if (isValid(proc->pt[i].entry)) {
-            proc->pt[i].history = (proc->pt[i].history >> 1) | 
-                                  (isReferenced(proc->pt[i].entry) ? 0x8000 : 0);
-            clearReferenced(&proc->pt[i].entry);
-        }
+    for (int page = 0; page < PAGE_TABLE_ENTRIES; page++) {
+        if (!isValid(proc->pt[page].entry)) continue;
+        
+        uint16_t wasReferenced = isReferenced(proc->pt[page].entry) ? 0x8000 : 0;
+        proc->pt[page].history = (proc->pt[page].history >> 1) | wasReferenced;
+        
+        clearReferenced(&proc->pt[page].entry);
     }
 }
 
-// Simulate binary search with page replacement.
-bool simulateBinarySearch(Process *proc, int k) {
-    int L = 0, R = proc->s - 1;
+// Handle page fault during simulation
+bool handlePageFault(Process *proc, int vpage) {
+    proc->pageFaults++;
+    totalPageFaults++;
+    
+    #ifdef VERBOSE
+    printf("    Fault on Page %4d: ", vpage);
+    #endif
+    
+    if (NFF > NFFMIN) { // free frames available
+        if (!allocateFrame(proc, vpage)) {
+            fprintf(stderr, "Error: Frame allocation failed despite sufficient free frames\n");
+            return false;
+        }
+        #ifdef VERBOSE
+        printf("Free frame %d found\n", getFrame(proc->pt[vpage].entry));
+        #endif
+        return true;
+    }
+    
+    // else find victim page
+    proc->pageReplacements++;
+    totalPageReplacements++;
+    
+    int victimPage = findVictimPage(proc);
+    if (victimPage < 0) {
+        fprintf(stderr, "Error: No suitable victim page found\n");
+        return false;
+    }
+    
+    int victimFrame = getFrame(proc->pt[victimPage].entry);
+    
+    #ifdef VERBOSE
+    printf("To replace Page %3d at Frame %d [history = %d]\n",
+           victimPage, victimFrame, proc->pt[victimPage].history);
+    #endif
+    
+    int frameIndex = findSuitableFrame(proc, vpage); // free frame for vpage
+    int newFrame = freeFrames[frameIndex].frameNumber;
+    
+    // Update data structures
+    removeFreeFrameAt(frameIndex);
+    invalidate(&proc->pt[victimPage].entry);
+    proc->pt[vpage].entry = makeEntry(newFrame, true);
+    proc->pt[vpage].history = 0xFFFF;  // Mark as most recently used
+    
+    // Return victim frame to free list
+    freeFrames[NFF].frameNumber = victimFrame;
+    freeFrames[NFF].lastOwner = proc->pid;
+    freeFrames[NFF].lastPage = victimPage;
+    NFF++;
+    
+    return true;
+}
+
+// Simulate binary search with page replacement
+bool binarySearch(Process *proc, int k) {
+    int L = 0;
+    int R = proc->s - 1;
+    
     while (L < R) {
-        int M = (L + R) / 2;
-        int offset = M / INTS_PER_PAGE;
-        int vpage = ESSENTIAL_PAGES + offset;
+        int M = (L+R) / 2;
+        
+        int arrayOffset = M;
+        int pageOffset = arrayOffset / INTS_PER_PAGE;
+        int vpage = ESSENTIAL_PAGES + pageOffset; // virtual page number
+        
         proc->pageAccesses++;
         totalPageAccesses++;
         
+        // Check if page is in memory
         if (!isValid(proc->pt[vpage].entry)) {
-            proc->pageFaults++;
-            #ifdef VERBOSE
-                printf("    Fault on Page %4d: ", vpage);
-            #endif
-            totalPageFaults++;
-            
-            if (NFF > NFFMIN) {
-                if (!allocateFrame(proc, vpage)) {
-                    fprintf(stderr, "Error: Failed to allocate frame with sufficient free frames\n");
-                    return false;
-                }
-                #ifdef VERBOSE
-                    printf("Free frame %d found\n", getFrame(proc->pt[vpage].entry));
-                #endif
-            } else {
-                proc->pageReplacements++;
-                totalPageReplacements++;
-                int victimPage = findVictimPage(proc);
-                if (victimPage == -1) {
-                    fprintf(stderr, "Error: Could not find a victim page for replacement\n");
-                    return false;
-                }
-                int victimFrame = getFrame(proc->pt[victimPage].entry);
-                #ifdef VERBOSE
-                    printf("To replace Page %3d at Frame %d [history = %d]\n",
-                        victimPage, victimFrame, proc->pt[victimPage].history);
-                #endif
-                
-                int frameIndex = findSuitableFrame(proc, vpage);
-                int newFrame = freeFrames[frameIndex].frameNumber;
-                removeFreeFrameAt(frameIndex);
-                invalidate(&proc->pt[victimPage].entry);
-                proc->pt[vpage].entry = makeEntry(newFrame, true);
-                proc->pt[vpage].history = 0xFFFF;
-                freeFrames[NFF].frameNumber = victimFrame;
-                freeFrames[NFF].lastOwner = proc->pid;
-                freeFrames[NFF].lastPage = victimPage;
-                NFF++;
+            // Handle page fault
+            if (!handlePageFault(proc, vpage)) {
+                return false;
             }
         } else {
+            // Page in memory, mark as referenced
             setReferenced(&proc->pt[vpage].entry);
         }
         
-        if (k <= M)
+        // Continue binary search
+        if (k <= M) {
             R = M;
-        else
+        } else {
             L = M + 1;
+        }
     }
     
+    // Update page reference history after search completes
     updatePageHistory(proc);
     return true;
 }
 
-void readinput(){
-    FILE *fin = fopen("search.txt", "r");
-    if (!fin) {
-        perror("search.txt");
-        exit(1);
+// Read input data from file
+void readinput() {
+    FILE *input;
+    if ((input = fopen("search.txt", "r")) == NULL) {
+        perror("Cannot open search.txt");
+        exit(EXIT_FAILURE);
     }
     
-    fscanf(fin, "%d %d", &totalProcesses, &searchesPerProcess);
-    
-    processes = (Process **)malloc(totalProcesses * sizeof(Process *));
-    if (processes == NULL) {
-        fprintf(stderr, "Error: Memory allocation failed\n");
-        exit(1);
+    if (fscanf(input, "%d %d", &totalProcesses, &searchesPerProcess) != 2) {
+        fprintf(stderr, "Error reading process count and search count\n");
+        exit(EXIT_FAILURE);
     }
     
+    processes = (Process**)safeAlloc(totalProcesses * sizeof(Process*));
+    
+    // Read each process data
     for (int i = 0; i < totalProcesses; i++) {
-        int s;
-        fscanf(fin, "%d", &s);
-        
-        Process *proc = (Process *)malloc(sizeof(Process));
-        if (proc == NULL) {
-            fprintf(stderr, "Error: Memory allocation failed\n");
-            exit(1);
+        int arraySize;
+        if (fscanf(input, "%d", &arraySize) != 1) {
+            fprintf(stderr, "Error reading array size for process %d\n", i);
+            exit(EXIT_FAILURE);
         }
         
-        initproc(proc, i, s, searchesPerProcess);
+        Process *proc = (Process*)safeAlloc(sizeof(Process));
+        initproc(proc, i, arraySize, searchesPerProcess);
         
+        // Read search keys
         for (int j = 0; j < searchesPerProcess; j++) {
-            fscanf(fin, "%d", &proc->keys[j]);
+            if (fscanf(input, "%d", &proc->keys[j]) != 1) {
+                fprintf(stderr, "Error reading search key %d for process %d\n", j, i);
+                exit(EXIT_FAILURE);
+            }
         }
         
+        // Allocate essential pages
         if (!allocateEssentialPages(proc)) {
-            fprintf(stderr, "Error: Not enough free frames for essential pages of process %d\n", i);
-            exit(1);
+            fprintf(stderr, "Not enough memory for essential pages of process %d\n", i);
+            exit(EXIT_FAILURE);
         }
         
         processes[i] = proc;
     }
-    fclose(fin);
-}
-
-void printProcessStatistics(Process *proc) {
-    printf("    %-3d       %d    %5d   (%5.2f%%)  %5d   (%5.2f%%)    %3d + %3d + %3d + %d (%4.2f%% + %4.2f%% + %4.2f%% + %4.2f%%)\n",
-           proc->pid,
-           proc->pageAccesses,
-           proc->pageFaults,
-           (proc->pageFaults * 100.0) / proc->pageAccesses,
-           proc->pageReplacements,
-           (proc->pageReplacements * 100.0) / proc->pageAccesses,
-           proc->attemptCounts[0],
-           proc->attemptCounts[1],
-           proc->attemptCounts[2],
-           proc->attemptCounts[3],
-           (proc->pageReplacements > 0 ? (proc->attemptCounts[0] * 100.0) / proc->pageReplacements : 0),
-           (proc->pageReplacements > 0 ? (proc->attemptCounts[1] * 100.0) / proc->pageReplacements : 0),
-           (proc->pageReplacements > 0 ? (proc->attemptCounts[2] * 100.0) / proc->pageReplacements : 0),
-           (proc->pageReplacements > 0 ? (proc->attemptCounts[3] * 100.0) / proc->pageReplacements : 0));
-}
-
-void printTotalStatistics() {
-    printf("\n    Total     %d    %5d (%5.2f%%)    %5d (%5.2f%%)    %3d + %3d + %3d + %d (%4.2f%% + %4.2f%% + %4.2f%% + %4.2f%%)\n",
-           totalPageAccesses,
-           totalPageFaults,
-           (totalPageFaults * 100.0) / totalPageAccesses,
-           totalPageReplacements,
-           (totalPageReplacements * 100.0) / totalPageAccesses,
-           totalAttemptCounts[0],
-           totalAttemptCounts[1],
-           totalAttemptCounts[2],
-           totalAttemptCounts[3],
-           (totalPageReplacements > 0 ? (totalAttemptCounts[0] * 100.0) / totalPageReplacements : 0),
-           (totalPageReplacements > 0 ? (totalAttemptCounts[1] * 100.0) / totalPageReplacements : 0),
-           (totalPageReplacements > 0 ? (totalAttemptCounts[2] * 100.0) / totalPageReplacements : 0),
-           (totalPageReplacements > 0 ? (totalAttemptCounts[3] * 100.0) / totalPageReplacements : 0));
-}
-
-int main() {
-    srand(time(NULL));
     
-    freeFrames = (FrameListEntry *)malloc(USER_FRAMES * sizeof(FrameListEntry));
-    if (freeFrames == NULL) {
-        fprintf(stderr, "Error: Memory allocation failed\n");
-        exit(1);
+    fclose(input);
+}
+
+// statistics for a single process
+void printProcessStatistics(Process *proc) {
+    // Calculate percentages
+    float faultPercent = (proc->pageAccesses > 0) ? (proc->pageFaults * 100.0f) / proc->pageAccesses : 0;
+    float replacePercent = (proc->pageAccesses > 0) ? (proc->pageReplacements * 100.0f) / proc->pageAccesses : 0;
+    
+    // Calculate attempt percentages
+    float attemptPercent[4];
+    for (int i = 0; i < 4; i++) {
+        attemptPercent[i] = (proc->pageReplacements > 0) ? (proc->attemptCounts[i] * 100.0f) / proc->pageReplacements : 0;
     }
     
-    // Initialize free frame list with frame numbers starting at 1280
+    printf("    %-3d       %d    %5d   (%5.2f%%)  %5d   (%5.2f%%)    %3d + %3d + %3d + %d "
+           "(%4.2f%% + %4.2f%% + %4.2f%% + %4.2f%%)\n",
+           proc->pid, proc->pageAccesses, proc->pageFaults, faultPercent,
+           proc->pageReplacements, replacePercent,
+           proc->attemptCounts[0], proc->attemptCounts[1], 
+           proc->attemptCounts[2], proc->attemptCounts[3],
+           attemptPercent[0], attemptPercent[1], attemptPercent[2], attemptPercent[3]);
+}
+
+// Print overall statistics
+void printTotalStatistics() {
+    float faultPercent = (totalPageAccesses > 0) ? (totalPageFaults * 100.0f) / totalPageAccesses : 0;
+    float replacePercent = (totalPageAccesses > 0) ? (totalPageReplacements * 100.0f) / totalPageAccesses : 0;
+    
+    float attemptPercent[4];
+    for (int i = 0; i < 4; i++) {
+        attemptPercent[i] = (totalPageReplacements > 0) ? (totalAttemptCounts[i] * 100.0f) / totalPageReplacements : 0;
+    }
+    
+    printf("\n    Total     %d    %5d (%5.2f%%)    %5d (%5.2f%%)    %3d + %3d + %3d + %d "
+           "(%4.2f%% + %4.2f%% + %4.2f%% + %4.2f%%)\n",
+           totalPageAccesses, totalPageFaults, faultPercent,
+           totalPageReplacements, replacePercent,
+           totalAttemptCounts[0], totalAttemptCounts[1], 
+           totalAttemptCounts[2], totalAttemptCounts[3],
+           attemptPercent[0], attemptPercent[1], attemptPercent[2], attemptPercent[3]);
+}
+
+// Clean up all allocated memory
+void cleanup() {
+    for (int i = 0; i < totalProcesses; i++) {
+        free(processes[i]->keys);
+        free(processes[i]->pt);
+        free(processes[i]);
+    }
+    free(processes);
+    free(freeFrames);
+}
+
+// Main execution function
+int main() {
+    srand((unsigned int)time(NULL) * getpid());
+    
+    // Set up free frame list
+    freeFrames = (FrameListEntry*)safeAlloc(USER_FRAMES * sizeof(FrameListEntry));
     for (int i = 0; i < USER_FRAMES; i++) {
         freeFrames[i].frameNumber = i;
         freeFrames[i].lastOwner = -1;
@@ -410,40 +488,45 @@ int main() {
     }
     NFF = USER_FRAMES;
     
+    // Read and process input data
     readinput();
 
-    int completedProcesses = 0;
-    int currentPid = 0;
+    /**** Round-robin execution of processes ****/
+    int finishedProcesses = 0;
+    int current = 0;
     
-    while (completedProcesses < totalProcesses) {
-        Process *proc = processes[currentPid];
+    while (finishedProcesses < totalProcesses) {
+        Process *proc = processes[current];
+        
+        // Skip completed processes
         if (proc->currentSearch >= proc->m) {
-            currentPid = (currentPid + 1) % totalProcesses;
+            current = (current + 1) % totalProcesses;
             continue;
         }
         
-        int key = proc->keys[proc->currentSearch];
+        int searchKey = proc->keys[proc->currentSearch];
         
         #ifdef VERBOSE
         printf("+++ Process %d: Search %d\n", proc->pid, proc->currentSearch + 1);
         #endif
         
-        bool success = simulateBinarySearch(proc, key);
-        
-        if (success) {
+        if (binarySearch(proc, searchKey)) {
             proc->currentSearch++;
+            
+            // Check if process has completed all searches
             if (proc->currentSearch >= proc->m) {
-                completedProcesses++;
+                finishedProcesses++;
                 freeProcessFrames(proc);
             }
         } else {
-            fprintf(stderr, "Error: Binary search failed for process %d\n", proc->pid);
-            return 1;
+            fprintf(stderr, "Search operation failed for process %d\n", proc->pid);
+            return EXIT_FAILURE;
         }
         
-        currentPid = (currentPid + 1) % totalProcesses;
+        current = (current + 1) % totalProcesses; // next process
     }
     
+    // final statistics
     printf("+++ Page access summary\n");
     printf("    PID     Accesses        Faults         Replacements                        Attempts\n");
     
@@ -453,13 +536,8 @@ int main() {
     
     printTotalStatistics();
     
-    for (int i = 0; i < totalProcesses; i++) {
-        free(processes[i]->keys);
-        free(processes[i]->pt);
-        free(processes[i]);
-    }
-    free(processes);
-    free(freeFrames);
+    // Free all allocated memory
+    cleanup();
     
     return 0;
 }
