@@ -1,0 +1,32 @@
+semaphores
+
+	Name		Count		Init
+	--------	--------	----
+	cook		1		0
+	waiter		5		0
+	customer	n <= 100	0
+	mutex		1		1
+
+shared memory
+
+	M[0]	time
+	M[1]	no_of_empty_tables
+	M[2]	next_waiter
+	M[3]	no_of_orders_pending
+
+	M[100-299]	For waiter 0
+	M[300-499]	For waiter 1
+	M[500-699]	For waiter 2
+	M[700-899]	For waiter 3
+	M[900-1099]	For waiter 4
+
+		*00	food_ready request
+		*01	New_customer request
+		*02	front of customer queue
+		*03	back of customer queue
+		*04 onward  queue of (customer_no,customer_cnt) pairs
+
+	M[1100]	front of queue for cook
+	M[1101]	back of queue for cook
+
+        M[1102] onward: Queue of (waiter_no, customer_no, customer_cnt) triples
